@@ -1,0 +1,56 @@
+{
+  "name": "pebblekey",
+  "author": "alarmatwork",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "@rebble/clay": "^1.1.0"
+  },
+  "pebble": {
+    "displayName": "PebbleKey",
+    "uuid": "abb96b18-7a47-4765-a77e-6f82c03d9d92",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "capabilities": [
+      "configurable",
+      "location"
+    ],
+    "usesPermissions": [
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "auth.volvocars.com",
+            "api.volvocars.com"
+          ]
+        }
+      },
+      "Location"
+    ],
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery",
+      "flint",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "Command",
+      "JSReady",
+      "Status",
+      "Message",
+      "Info"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

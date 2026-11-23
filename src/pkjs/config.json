@@ -1,0 +1,72 @@
+[
+  {
+    "type": "heading",
+    "defaultValue": "PebbleKey"
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Volvo account"
+      },
+      {
+        "type": "text",
+        "id": "status",
+        "defaultValue": "Not set up yet."
+      },
+      {
+        "type": "input",
+        "messageKey": "SetupCode",
+        "label": "Setup code",
+        "description": "Paste the code printed by tools/volvo_login.py. Leave empty to keep the current setup.",
+        "defaultValue": "",
+        "attributes": {
+          "placeholder": "EX30K1...",
+          "autocomplete": "off",
+          "autocapitalize": "off",
+          "autocorrect": "off",
+          "spellcheck": "false"
+        }
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Unlock safety"
+      },
+      {
+        "type": "select",
+        "messageKey": "UnlockRange",
+        "label": "Unlock only near the car",
+        "description": "If the phone is further from the parked car than this, or either position is unknown, the watch asks you to hold UP a second time before unlocking.",
+        "defaultValue": "200",
+        "options": [
+          {
+            "label": "Within 100 m",
+            "value": "100"
+          },
+          {
+            "label": "Within 200 m",
+            "value": "200"
+          },
+          {
+            "label": "Within 500 m",
+            "value": "500"
+          },
+          {
+            "label": "Off: never ask",
+            "value": "0"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "submit",
+    "defaultValue": "Save"
+  }
+]
