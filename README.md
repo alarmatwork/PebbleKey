@@ -185,3 +185,7 @@ runs the tests for the phone-side code against a fake Volvo backend; no car or a
 | `src/pkjs/config.json` | Settings page ([Clay](https://github.com/pebble/clay)) |
 | `tools/volvo_login.py` | One-time Volvo ID login |
 | `test/` | Tests |
+
+## Licence
+
+[MIT](LICENSE)

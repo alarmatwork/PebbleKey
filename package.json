@@ -2,6 +2,7 @@
   "name": "pebblekey",
   "author": "alarmatwork",
   "version": "1.0.0",
+  "license": "MIT",
   "keywords": [
     "pebble-app"
   ],
