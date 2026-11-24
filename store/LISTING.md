@@ -24,6 +24,7 @@ does not appear in search, and you can switch it to Listed later.
 | Description | the text in [description.txt](description.txt) |
 | Small icon (80×80) | [icon-80.png](icon-80.png) |
 | Large icon (144×144) | [icon-144.png](icon-144.png) |
+| Banner (720×320, optional) | [banner.png](banner.png), the same file for every platform |
 | Website URL | https://github.com/alarmatwork/PebbleKey |
 | Source code URL | https://github.com/alarmatwork/PebbleKey |
 | Release notes | First release. |
