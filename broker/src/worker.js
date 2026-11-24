@@ -1,4 +1,4 @@
-// PebbleKey sign-in service (Cloudflare Worker).
+// PebbleKey for Volvo sign-in service (Cloudflare Worker).
 //
 // Lets people use PebbleKey without their own Volvo developer account: one Volvo API
 // application belongs to whoever runs this service, and every user signs in to it with their
@@ -175,7 +175,7 @@ function page(status, title, body, script, tone) {
 <h1>${escapeHtml(title)}</h1>
 ${body}
 </main>
-<footer>PebbleKey is not affiliated with Volvo Cars.</footer>${script ? `<script nonce="${nonce}">${script}</script>` : ''}</body>
+<footer>PebbleKey for Volvo is an independent project, not affiliated with Volvo Cars.</footer>${script ? `<script nonce="${nonce}">${script}</script>` : ''}</body>
 </html>`;
   return new Response(html, {
     status,
@@ -211,7 +211,7 @@ function json(status, data) {
 }
 
 function landing() {
-  return page(200, 'PebbleKey', `
+  return page(200, 'PebbleKey for Volvo', `
 <p>Sign in with your Volvo ID to let PebbleKey on your watch lock, unlock and pre-heat your car.</p>
 <p class="tip"><strong>Tick "Remember me"</strong> on Volvo's sign-in page. Without it the watch
 is signed out again within hours.</p>

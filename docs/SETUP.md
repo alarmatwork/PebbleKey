@@ -1,4 +1,4 @@
-# Setting up PebbleKey, step by step
+# Setting up PebbleKey for Volvo, step by step
 
 This guide takes you from nothing to locking your car from your wrist. It takes about five
 minutes and needs only your phone and your watch.
@@ -25,7 +25,7 @@ The Pebble app asks you to allow two things for PebbleKey:
 
 ## 2. Open PebbleKey on the watch
 
-Find PebbleKey in the watch's app menu and open it. Until it is set up, the badge is grey.
+Find PebbleKey in the watch's app menu (the name is shortened there) and open it. Until it is set up, the badge is grey.
 
 <img src="setup-watch-start.png" alt="PebbleKey on the watch before setup: a grey padlock badge" width="200">
 

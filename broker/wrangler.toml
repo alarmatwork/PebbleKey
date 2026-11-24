@@ -1,4 +1,4 @@
-# PebbleKey sign-in service. Deploy with: npx wrangler deploy
+# PebbleKey for Volvo sign-in service. Deploy with: npx wrangler deploy
 name = "pebblekey"
 main = "src/worker.js"
 compatibility_date = "2026-01-01"

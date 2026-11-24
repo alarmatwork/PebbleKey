@@ -1,4 +1,4 @@
-# PebbleKey
+# PebbleKey for Volvo
 
 Lock, unlock and pre-heat a Volvo from a Pebble watch.
 
@@ -19,7 +19,7 @@ unlock without a second hold.*
 
 *Pebble Round 2, and a black-and-white Pebble 2.*
 
-PebbleKey is a Pebble watchapp that talks to Volvo's
+PebbleKey for Volvo (PebbleKey for short) is a Pebble watchapp that talks to Volvo's
 [Connected Vehicle API](https://developer.volvocars.com/apis/connected-vehicle/v2/overview/).
 There is no extra phone app: the phone half is JavaScript that runs inside the official Pebble
 app, and it sends commands straight to Volvo.

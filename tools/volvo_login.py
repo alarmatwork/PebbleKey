@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time Volvo ID login for the PebbleKey Pebble app.
+"""One-time Volvo ID login for the PebbleKey for Volvo Pebble app.
 
 Runs the OAuth authorisation-code flow (with PKCE) in your browser and prints a
 setup code to paste into the watchapp's settings page in the Pebble phone app.
