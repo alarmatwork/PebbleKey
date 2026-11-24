@@ -9,20 +9,42 @@ Lock, unlock and pre-heat a Volvo from a Pebble watch.
 <img src="docs/screenshot-away.png" alt="Boot open, and the car is 2.3 km away: hold UP again to unlock" width="170">
 </p>
 
-*Pebble Time 2: locked; unlocking; unlocked with climate on; boot open and too far away to
-unlock without a second hold.*
-
-<p>
-<img src="docs/screenshot-round.png" alt="PebbleKey on a Pebble Round 2" width="190">
-<img src="docs/screenshot-bw.png" alt="PebbleKey on a black-and-white Pebble 2" width="120">
-</p>
-
-*Pebble Round 2, and a black-and-white Pebble 2.*
-
-PebbleKey for Volvo (PebbleKey for short) is a Pebble watchapp that talks to Volvo's
+PebbleKey for Volvo (PebbleKey for short) is a watchapp for every Pebble model. There is no
+extra phone app to install: it runs inside the Pebble app you already have and talks to Volvo's
 [Connected Vehicle API](https://developer.volvocars.com/apis/connected-vehicle/v2/overview/).
-There is no extra phone app: the phone half is JavaScript that runs inside the official Pebble
-app, and it sends commands straight to Volvo.
+
+> **Status:** a personal project built for a Volvo EX30. It is young and lightly tested. Other
+> Volvo models that support the Connected Vehicle API should work but have not been tried.
+> It is not affiliated with Volvo Cars or with Pebble / Core Devices. It can unlock your car:
+> use it at your own risk.
+
+## Set up: Sign in with Volvo
+
+You need a Pebble watch paired with the Pebble app on your phone, and the Volvo ID you use in
+the Volvo Cars app. It takes about five minutes.
+
+1. **Install.** On your phone, download
+   [PebbleKey.pbw](https://github.com/alarmatwork/PebbleKey/raw/main/dist/PebbleKey.pbw) and
+   open the file with the Pebble app. Allow PebbleKey internet access and location when the
+   Pebble app asks.
+2. **Open PebbleKey on the watch** and leave it open.
+3. **Tap Sign in with Volvo** in PebbleKey's settings in the Pebble app. Your browser opens.
+4. **Sign in.** Continue to Volvo, tick **Remember me**, sign in and approve the access
+   PebbleKey asks for.
+5. **Tap Finish in the Pebble app** (or pick your car, if you have several). The watch buzzes
+   and shows "Setup saved", then your car's state.
+
+If the last tap does nothing, copy the code shown below the button and paste it into
+**Setup code** in PebbleKey's settings.
+
+**[The same steps in detail, with screenshots](docs/SETUP.md)**
+
+Signing in goes through a small sign-in service run by the project's author; your password goes
+only to Volvo. If you would rather not rely on that service, use
+[your own Volvo keys](#set-up-your-own-volvo-keys) instead. [Two ways to set it up](#two-ways-to-set-it-up)
+compares the two.
+
+## Using it
 
 | Button | Action |
 | --- | --- |
@@ -39,10 +61,16 @@ what the car last reported:
   level.
 - **Bottom:** what PebbleKey is doing, the result, or the reason something failed.
 
-> **Status:** a personal project built for a Volvo EX30. It is young and lightly tested. Other
-> Volvo models that support the Connected Vehicle API should work but have not been tried.
-> It is not affiliated with Volvo Cars or with Pebble / Core Devices. It can unlock your car:
-> use it at your own risk.
+The screenshots at the top are from a Pebble Time 2: locked; unlocking; unlocked with climate
+on; boot open and too far away to unlock without a second hold. It looks like this on a Pebble
+Round 2 and on a black-and-white Pebble 2:
+
+<p>
+<img src="docs/screenshot-round.png" alt="PebbleKey on a Pebble Round 2" width="190">
+<img src="docs/screenshot-bw.png" alt="PebbleKey on a black-and-white Pebble 2" width="120">
+</p>
+
+More under [How it behaves](#how-it-behaves) and [Quick launch](#quick-launch-optional).
 
 ## Two ways to set it up
 
@@ -63,8 +91,8 @@ active Volvo ID and remote services.
 ## Build and install
 
 **Ready-made build:** [dist/PebbleKey.pbw](dist/PebbleKey.pbw) is the watchapp built from this
-repository. Download it on your phone and open it with the Pebble app. Both setup routes work
-with it; skip to [installing](#install-on-the-watch) if you use it.
+repository. Both setup routes work with it; skip to [installing](#install-on-the-watch) if you
+use it.
 
 To build it yourself you need Python 3.8+, Node.js and [uv](https://docs.astral.sh/uv/).
 
@@ -108,21 +136,6 @@ The Pebble phone app will ask you to allow PebbleKey:
 
 - **Internet access**, to reach Volvo (and the sign-in service, if the build has one)
 - **Location**, only for the distance check before unlocking
-
-## Set up: Sign in with Volvo
-
-**[Step-by-step guide with screenshots](docs/SETUP.md)**, starting from installing the app. In
-short:
-
-1. Open PebbleKey on the watch and leave it open.
-2. In the Pebble phone app open PebbleKey's settings and tap **Sign in with Volvo**. Your
-   browser opens.
-3. Continue to Volvo, tick **Remember me**, sign in and approve the access PebbleKey asks for.
-4. Tap **Finish in the Pebble app** (or pick your car, if you have several). The watch buzzes
-   and shows "Setup saved".
-
-If the last tap does nothing, copy the code shown below the button and paste it into
-**Setup code** in PebbleKey's settings.
 
 ## Set up: your own Volvo keys
 
