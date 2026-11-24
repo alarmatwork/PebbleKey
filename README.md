@@ -111,6 +111,9 @@ The Pebble phone app will ask you to allow PebbleKey:
 
 ## Set up: Sign in with Volvo
 
+**[Step-by-step guide with screenshots](docs/SETUP.md)**, starting from installing the app. In
+short:
+
 1. Open PebbleKey on the watch and leave it open.
 2. In the Pebble phone app open PebbleKey's settings and tap **Sign in with Volvo**. Your
    browser opens.
@@ -309,6 +312,7 @@ account needed.
 | `tools/set_broker.py` | Sets the sign-in service address in the two places that need it |
 | `tools/make_dist.sh` | Builds and refreshes `dist/PebbleKey.pbw`, the ready-made build |
 | `test/`, `broker/test/` | Tests |
+| `docs/SETUP.md` | Step-by-step setup guide for the sign-in route |
 
 ## Licence
 
