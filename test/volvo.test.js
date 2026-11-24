@@ -129,7 +129,7 @@ test('rejects bad setup codes and reports unconfigured', async function() {
 test('unlock: refreshes, stores the rotated token, sends the documented request', async function() {
   var s = setup();
   assert.strictEqual(s.volvo.importSetupCode('  ' + setupCode('rt-0') + '\n'), null);
-  assert.strictEqual(s.volvo.describe(), 'Set up for VIN ending 123456.');
+  assert.strictEqual(s.volvo.describe(), 'Set up with your own keys, car VIN ending 123456.');
 
   var result = await send(s.volvo, 'unlock');
   assert.strictEqual(result.err, null);
@@ -310,4 +310,112 @@ test('car location: reads the GeoJSON point from the Location API', async functi
   denied.volvo.importSetupCode(setupCode('rt-0'));
   var err = await new Promise(function(resolve) { denied.volvo.getCarLocation(resolve); });
   assert.strictEqual(err, 'Not allowed (scopes?)');
+});
+
+// --- Signing in through a sign-in service (broker/) instead of own Volvo keys ---
+
+var BROKER = 'https://pebblekey.example.workers.dev';
+
+function brokerCode(fields) {
+  return 'EX30K2.' + Buffer.from(JSON.stringify(fields)).toString('base64url');
+}
+
+// Fake sign-in service plus fake Volvo API. `refresh(req)` answers POST /refresh.
+function brokerSetup(refresh, brokerUrl) {
+  var log = [];
+  var storage = makeStorage();
+  var volvo = createVolvo({
+    XMLHttpRequest: makeXhr(function(req) {
+      if (req.url === BROKER + '/refresh') {
+        return refresh(req);
+      }
+      return { status: 200, body: { data: { invokeStatus: 'COMPLETED' } } };
+    }, log),
+    storage: storage,
+    now: function() { return 1000000; },
+    brokerUrl: brokerUrl === undefined ? BROKER + '/' : brokerUrl
+  });
+  return { volvo: volvo, log: log, storage: storage };
+}
+
+test('broker setup code: refreshes through the service, without any client secret', async function() {
+  var s = brokerSetup(function() {
+    return { status: 200, body: { access_token: 'at-1', refresh_token: 'rt-1', expires_in: 300, api_key: 'key-1' } };
+  });
+  assert.strictEqual(
+    s.volvo.importSetupCode(brokerCode({ k: 'key-1', v: 'yv1abcdefgh123456', r: 'rt-0' })), null);
+  assert.strictEqual(s.volvo.describe(), 'Signed in with Volvo, car VIN ending 123456.');
+  assert.strictEqual((await send(s.volvo, 'lock')).err, null);
+
+  var refresh = s.log[0];
+  assert.strictEqual(refresh.method, 'POST');
+  assert.strictEqual(refresh.url, BROKER + '/refresh');
+  assert.strictEqual(refresh.body, 'refresh_token=rt-0');
+  assert.strictEqual(refresh.headers.authorization, undefined);
+
+  var command = s.log[1];
+  assert.match(command.url, /\/vehicles\/YV1ABCDEFGH123456\/commands\/lock$/);
+  assert.strictEqual(command.headers.authorization, 'Bearer at-1');
+  assert.strictEqual(command.headers['vcc-api-key'], 'key-1');
+  assert.strictEqual(JSON.parse(s.storage.data['ex30-tokens']).refreshToken, 'rt-1');
+  assert.ok(!('clientSecret' in JSON.parse(s.storage.data['ex30-creds'])));
+});
+
+test('broker: a replaced API key is picked up from the next refresh', async function() {
+  var s = brokerSetup(function() {
+    return { status: 200, body: { access_token: 'at-1', refresh_token: 'rt-1', expires_in: 300, api_key: 'key-2' } };
+  });
+  s.volvo.importSetupCode(brokerCode({ k: 'key-1', v: 'YV1ABCDEFGH123456', r: 'rt-0' }));
+  await send(s.volvo, 'lock');
+  assert.strictEqual(s.log[1].headers['vcc-api-key'], 'key-2');
+  assert.strictEqual(JSON.parse(s.storage.data['ex30-creds']).apiKey, 'key-2');
+});
+
+test('broker: expired login and a failing service give different messages', async function() {
+  var code = brokerCode({ k: 'key-1', v: 'YV1ABCDEFGH123456', r: 'rt-0' });
+  var cases = [
+    [{ status: 400, body: { error: 'invalid_grant' } }, 'Login expired, sign in again'],
+    [{ status: 502, body: { error: 'upstream' } }, 'Sign-in service error 502'],
+    [{ status: 500, body: { error: 'not_configured' } }, 'Sign-in service error 500'],
+    [null, 'No internet on phone'],
+    [{ blocked: true }, 'Allow internet in Pebble app']
+  ];
+  for (var i = 0; i < cases.length; i++) {
+    var answer = cases[i][0];
+    var s = brokerSetup(function() { return answer; });
+    s.volvo.importSetupCode(code);
+    assert.strictEqual((await send(s.volvo, 'lock')).err, cases[i][1]);
+    // A failed refresh must not lose the refresh token.
+    assert.strictEqual(JSON.parse(s.storage.data['ex30-tokens']).refreshToken, 'rt-0');
+  }
+});
+
+test('broker setup code needs a build with a sign-in service, and all its fields', function() {
+  var code = brokerCode({ k: 'key-1', v: 'YV1ABCDEFGH123456', r: 'rt-0' });
+  var without = brokerSetup(function() { return null; }, '');
+  assert.strictEqual(without.volvo.importSetupCode(code), 'This build has no sign-in');
+  assert.strictEqual(without.volvo.isConfigured(), false);
+
+  var s = brokerSetup(function() { return null; });
+  assert.strictEqual(s.volvo.importSetupCode(brokerCode({ k: 'key-1', v: 'YV1ABCDEFGH123456' })),
+    'Setup code incomplete');
+  // An own-keys code is still incomplete without its client secret.
+  assert.strictEqual(
+    s.volvo.importSetupCode('EX30K1.' + Buffer.from(JSON.stringify({ k: 'k', v: 'v', r: 'r' })).toString('base64url')),
+    'Setup code incomplete');
+});
+
+test('own-keys setup code still refreshes directly with Volvo in a sign-in build', async function() {
+  var log = [];
+  var volvo = createVolvo({
+    XMLHttpRequest: makeXhr(backend(), log),
+    storage: makeStorage(),
+    brokerUrl: BROKER
+  });
+  assert.strictEqual(volvo.importSetupCode(setupCode('rt-0')), null);
+  assert.strictEqual(volvo.describe(), 'Set up with your own keys, car VIN ending 123456.');
+  assert.strictEqual((await send(volvo, 'lock')).err, null);
+  assert.match(log[0].url, /auth\.volvocars\.com.*\/token$/);
+  assert.match(log[0].headers.authorization, /^Basic /);
+  assert.match(log[0].body, /^grant_type=refresh_token&refresh_token=rt-0$/);
 });

@@ -9,7 +9,13 @@ var API_HOST = 'https://api.volvocars.com/';
 var CONNECTED_VEHICLE = 'connected-vehicle/v2';
 var LOCATION = 'location/v1';
 
+// Two kinds of setup code:
+//   EX30K1 comes from tools/volvo_login.py and carries your own Volvo application's client
+//          secret, so the phone refreshes its login directly with Volvo.
+//   EX30K2 comes from a sign-in service (broker/) and carries no secret; the phone asks that
+//          service to refresh its login.
 var SETUP_PREFIX = 'EX30K1.';
+var BROKER_SETUP_PREFIX = 'EX30K2.';
 var CREDS_KEY = 'ex30-creds';
 var TOKENS_KEY = 'ex30-tokens';
 var CLIMATE_KEY = 'ex30-climate';
@@ -80,10 +86,12 @@ var HTTP_ERRORS = {
  * @param {function} deps.XMLHttpRequest - XHR constructor
  * @param {Object} deps.storage - localStorage-like object
  * @param {function} [deps.now] - returns the current time in ms
+ * @param {string} [deps.brokerUrl] - sign-in service this build uses, if any
  */
 module.exports = function createVolvo(deps) {
   var XHR = deps.XMLHttpRequest;
   var storage = deps.storage;
+  var brokerUrl = String(deps.brokerUrl || '').replace(/\/+$/, '');
   var now = deps.now || function() { return Date.now(); };
 
   // Callbacks waiting on a token refresh that is already in flight.
@@ -152,17 +160,23 @@ module.exports = function createVolvo(deps) {
     if (!isConfigured()) {
       return 'Not set up yet.';
     }
-    return 'Set up for VIN ending ' + creds.vin.slice(-6) + '.';
+    return (creds.broker ? 'Signed in with Volvo' : 'Set up with your own keys') +
+      ', car VIN ending ' + creds.vin.slice(-6) + '.';
   }
 
   /**
-   * Store credentials from the setup code printed by tools/volvo_login.py.
+   * Store credentials from a setup code: one printed by tools/volvo_login.py, or one handed
+   * over by the sign-in service.
    * @returns {string|null} an error message, or null on success
    */
   function importSetupCode(code) {
     code = String(code || '').replace(/\s+/g, '');
-    if (code.indexOf(SETUP_PREFIX) !== 0) {
+    var viaBroker = code.indexOf(BROKER_SETUP_PREFIX) === 0;
+    if (!viaBroker && code.indexOf(SETUP_PREFIX) !== 0) {
       return 'Not a setup code';
+    }
+    if (viaBroker && !brokerUrl) {
+      return 'This build has no sign-in';
     }
     var data;
     try {
@@ -170,15 +184,17 @@ module.exports = function createVolvo(deps) {
     } catch (e) {
       return 'Setup code is damaged';
     }
-    if (!data || !data.i || !data.s || !data.k || !data.v || !data.r) {
+    if (!data || !data.k || !data.v || !data.r || (!viaBroker && (!data.i || !data.s))) {
       return 'Setup code incomplete';
     }
-    save(CREDS_KEY, {
-      clientId: data.i,
-      clientSecret: data.s,
-      apiKey: data.k,
-      vin: String(data.v).toUpperCase()
-    });
+    var creds = { apiKey: data.k, vin: String(data.v).toUpperCase() };
+    if (viaBroker) {
+      creds.broker = true;
+    } else {
+      creds.clientId = data.i;
+      creds.clientSecret = data.s;
+    }
+    save(CREDS_KEY, creds);
     save(TOKENS_KEY, { refreshToken: data.r, accessToken: null, expiresAt: 0 });
     return null;
   }
@@ -199,16 +215,30 @@ module.exports = function createVolvo(deps) {
 
     var creds = load(CREDS_KEY);
     var tokens = load(TOKENS_KEY);
-    var basic = base64Encode(
-      encodeURIComponent(creds.clientId) + ':' + encodeURIComponent(creds.clientSecret));
-    var body = 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(tokens.refreshToken);
+    var url = TOKEN_URL;
+    var headers = { 'content-type': 'application/x-www-form-urlencoded' };
+    var body = 'refresh_token=' + encodeURIComponent(tokens.refreshToken);
+    if (creds.broker) {
+      if (!brokerUrl) {
+        settle('This build has no sign-in');
+        return;
+      }
+      // The sign-in service holds the client secret and adds it on the way to Volvo.
+      url = brokerUrl + '/refresh';
+    } else {
+      body = 'grant_type=refresh_token&' + body;
+      headers.authorization = 'Basic ' + base64Encode(
+        encodeURIComponent(creds.clientId) + ':' + encodeURIComponent(creds.clientSecret));
+    }
 
-    http('POST', TOKEN_URL, {
-      'content-type': 'application/x-www-form-urlencoded',
-      'authorization': 'Basic ' + basic
-    }, body, function(status, text) {
+    http('POST', url, headers, body, function(status, text) {
       var json = parseJson(text);
       if (status === 200 && json.access_token) {
+        if (creds.broker && json.api_key && json.api_key !== creds.apiKey) {
+          // The service's operator replaced the Volvo API key.
+          creds.apiKey = json.api_key;
+          save(CREDS_KEY, creds);
+        }
         // Volvo rotates the refresh token on every use: the old one is dead now,
         // so persist the new one before doing anything else.
         save(TOKENS_KEY, {
@@ -219,6 +249,10 @@ module.exports = function createVolvo(deps) {
         settle(null, json.access_token);
       } else if (status === 0) {
         settle(noAnswerMessage(text));
+      } else if (creds.broker) {
+        // The service answers invalid_grant only when Volvo no longer accepts the login.
+        settle(json.error === 'invalid_grant' ? 'Login expired, sign in again' :
+          'Sign-in service error ' + status);
       } else if (status === 400 || status === 401) {
         // invalid_grant: refresh token expired or already used; invalid_client: bad secret.
         settle(json.error === 'invalid_client' ? 'Bad client secret' : 'Login expired, redo setup');

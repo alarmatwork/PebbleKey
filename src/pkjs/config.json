@@ -16,13 +16,20 @@
         "defaultValue": "Not set up yet."
       },
       {
+        "type": "button",
+        "id": "signin",
+        "defaultValue": "Sign in with Volvo",
+        "primary": true,
+        "description": "Opens Volvo's sign-in in your browser. Keep PebbleKey open on the watch while you sign in."
+      },
+      {
         "type": "input",
         "messageKey": "SetupCode",
         "label": "Setup code",
-        "description": "Paste the code printed by tools/volvo_login.py. Leave empty to keep the current setup.",
+        "description": "Only needed if signing in could not hand over by itself, or if you use your own Volvo keys (tools/volvo_login.py). Leave empty to keep the current setup.",
         "defaultValue": "",
         "attributes": {
-          "placeholder": "EX30K1...",
+          "placeholder": "EX30K...",
           "autocomplete": "off",
           "autocapitalize": "off",
           "autocorrect": "off",

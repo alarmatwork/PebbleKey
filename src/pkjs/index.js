@@ -1,5 +1,7 @@
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config.json');
+var customClay = require('./custom-clay');
+var brokerConfig = require('./broker.json');
 var createVolvo = require('./volvo');
 var createProximity = require('./proximity');
 
@@ -15,9 +17,19 @@ var STATUS_ERROR = 2;
 var STATUS_CONFIRM = 3;
 var DEFAULT_UNLOCK_RANGE_M = 200;
 
+// The sign-in service this build uses (see broker/), or '' for a build without one.
+var BROKER_URL = String(brokerConfig.url || '').replace(/\/+$/, '');
+
 // Settings stay on the phone, so Clay must not push them to the watch.
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
-var volvo = createVolvo({ XMLHttpRequest: XMLHttpRequest, storage: localStorage });
+var clay = new Clay(clayConfig, customClay, {
+  autoHandleEvents: false,
+  userData: { signInUrl: BROKER_URL }
+});
+var volvo = createVolvo({
+  XMLHttpRequest: XMLHttpRequest,
+  storage: localStorage,
+  brokerUrl: BROKER_URL
+});
 var proximity = createProximity({
   volvo: volvo,
   geolocation: typeof navigator !== 'undefined' ? navigator.geolocation : null
@@ -149,17 +161,47 @@ Pebble.addEventListener('showConfiguration', function() {
   Pebble.openURL(clay.generateUrl());
 });
 
+function applySetupCode(code) {
+  var err = volvo.importSetupCode(code);
+  tellWatch(err ? STATUS_ERROR : STATUS_OK, err || 'Setup saved');
+  if (!err) {
+    refreshStatus();
+  }
+}
+
+// The sign-in service finishes by opening pebblejs://close#<setup code>, which arrives here as
+// the whole response instead of Clay's settings. Depending on how the link reached the Pebble
+// app it may still be URL-encoded.
+function setupCodeFromSignIn(response) {
+  var text = String(response);
+  try {
+    text = decodeURIComponent(text);
+  } catch (e) {
+    // Not encoded.
+  }
+  return /^EX30K\d\.[A-Za-z0-9_-]+$/.test(text) ? text : null;
+}
+
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) {
     return;
   }
-  var settings = clay.getSettings(e.response, false);
+  var signInCode = setupCodeFromSignIn(e.response);
+  if (signInCode) {
+    applySetupCode(signInCode);
+    return;
+  }
+  var settings;
+  try {
+    settings = clay.getSettings(e.response, false);
+  } catch (err) {
+    console.log('Unreadable settings response');
+    return;
+  }
   var code = settings.SetupCode && settings.SetupCode.value;
   // The code holds secrets; it is kept by volvo.js, not in Clay's visible settings.
   clay.setSettings('SetupCode', '');
   if (code && String(code).replace(/\s+/g, '')) {
-    var err = volvo.importSetupCode(code);
-    tellWatch(err ? STATUS_ERROR : STATUS_OK, err || 'Setup saved');
-    refreshStatus();
+    applySetupCode(code);
   }
 });

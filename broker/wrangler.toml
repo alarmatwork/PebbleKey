@@ -1,0 +1,14 @@
+# PebbleKey sign-in service. Deploy with: npx wrangler deploy
+name = "pebblekey"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# The three Volvo keys are secrets, never written here:
+#   npx wrangler secret put VOLVO_CLIENT_ID
+#   npx wrangler secret put VOLVO_CLIENT_SECRET
+#   npx wrangler secret put VOLVO_API_KEY
+
+# Only if your Volvo application has fewer scopes than the default list in src/worker.js:
+# [vars]
+# VOLVO_SCOPES = "openid conve:vehicle_relation conve:lock conve:unlock"
