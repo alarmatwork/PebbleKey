@@ -62,11 +62,16 @@ there is one button per car: tap the one you want on the watch.
 
 <img src="setup-finish.png" alt="The Signed in page with the Finish in the Pebble app button" width="300">
 
-The watch buzzes and shows "Setup saved".
+The watch buzzes and shows "Setup saved". The Pebble app comes to the front, still showing
+PebbleKey's settings; it shows nothing new, so look at the watch.
 
-**If the tap does nothing:** tap **Copy code** further down that page, go back to PebbleKey's
-settings in the Pebble app, paste the code into **Setup code** and save. The code works once
-and is as sensitive as a password, so do not share it.
+**If the watch stays quiet:** the Pebble app passes the sign-in on only while PebbleKey is open
+on the watch. Open PebbleKey on the watch, switch back to the browser page and tap the button
+again.
+
+**If that does not help either:** tap **Copy code** further down that page, go back to
+PebbleKey's settings in the Pebble app, paste the code into **Setup code** and save. The code
+works once and is as sensitive as a password, so do not share it.
 
 ## 7. Done
 

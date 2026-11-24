@@ -338,10 +338,14 @@ async function callback(request, env, fetcher, now) {
   return page(200, 'Signed in', `
 <p>Keep PebbleKey open on your watch, then tap:</p>
 ${buttons}
-<p class="note">The watch buzzes and shows "Setup saved".</p>
+<p class="note">The watch buzzes and shows "Setup saved". The Pebble app itself shows nothing new.</p>
+<p class="note"><b>Watch stayed quiet?</b> The Pebble app passes the sign-in on only while
+PebbleKey is open on the watch. Open PebbleKey on the watch, come back to this page and tap the
+button again.</p>
 <hr>
-<p class="note">Nothing happened? Copy the code and paste it under "Setup code" in PebbleKey's
-settings in the Pebble app. Treat it like a password; it stops working once the watch has used it.</p>
+<p class="note">Still nothing? Copy the code and paste it under "Setup code" in PebbleKey's
+settings in the Pebble app, then save. Treat it like a password; it stops working once the watch
+has used it.</p>
 ${fallback}`, `
 document.addEventListener('click', function (event) {
   var id = event.target.getAttribute && event.target.getAttribute('data-copy');

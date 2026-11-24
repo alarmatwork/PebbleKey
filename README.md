@@ -34,7 +34,8 @@ the Volvo Cars app. It takes about five minutes.
 5. **Tap Finish in the Pebble app** (or pick your car, if you have several). The watch buzzes
    and shows "Setup saved", then your car's state.
 
-If the last tap does nothing, copy the code shown below the button and paste it into
+If the watch stays quiet after the last tap, check that PebbleKey is open on the watch and tap
+the button again. If that does not help, copy the code shown below the button and paste it into
 **Setup code** in PebbleKey's settings.
 
 **[The same steps in detail, with screenshots](docs/SETUP.md)**
