@@ -453,28 +453,25 @@ module.exports = function createVolvo(deps) {
 };
 
 /**
- * One short line for the watch, e.g. "Locked, 78%" or "Unlocked, boot open".
+ * The car's state in the form the watch draws it.
  * @param {Object} status - result of getStatus()
- * @param {number} [maxLength=22] - the battery level is dropped first if the line gets longer
+ * @returns {{lock: number, battery: number, open: string}} lock is 0 unknown, 1 locked,
+ *   2 unlocked; battery is a percentage or -1; open names what is open, e.g. "Boot open", or ''
  */
-function formatStatus(status, maxLength) {
-  var parts = [];
-  if (status.locked !== null) {
-    parts.push(status.locked ? 'locked' : 'unlocked');
-  }
+function watchStatus(status) {
+  var open = '';
   if (status.open && status.open.length) {
-    parts.push((status.open.length === 1 ? status.open[0] : 'car') + ' open');
+    var what = status.open.length === 1 ? status.open[0] : 'car';
+    open = what.charAt(0).toUpperCase() + what.slice(1) + ' open';
   }
-  var line = parts.join(', ');
-  if (status.battery !== null) {
-    var withBattery = (line ? line + ', ' : '') + status.battery + '%';
-    if (withBattery.length <= (maxLength || 22) || !line) {
-      line = withBattery;
-    }
-  }
-  return line.charAt(0).toUpperCase() + line.slice(1);
+  var battery = status.battery;
+  return {
+    lock: status.locked === null ? 0 : status.locked ? 1 : 2,
+    battery: battery === null ? -1 : Math.max(0, Math.min(100, battery)),
+    open: open
+  };
 }
 
-module.exports.formatStatus = formatStatus;
+module.exports.watchStatus = watchStatus;
 module.exports.base64Encode = base64Encode;
 module.exports.base64Decode = base64Decode;

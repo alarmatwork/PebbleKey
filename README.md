@@ -2,7 +2,22 @@
 
 Lock, unlock and pre-heat a Volvo from a Pebble watch.
 
-<img src="docs/screenshot.png" alt="PebbleKey on a Pebble Time 2" width="200">
+<p>
+<img src="docs/screenshot.png" alt="Car locked, battery at 78%" width="170">
+<img src="docs/screenshot-busy.png" alt="Unlocking, with a ring turning around the badge" width="170">
+<img src="docs/screenshot-climate.png" alt="Car unlocked, climate on" width="170">
+<img src="docs/screenshot-away.png" alt="Boot open, and the car is 2.3 km away: hold UP again to unlock" width="170">
+</p>
+
+*Pebble Time 2: locked; unlocking; unlocked with climate on; boot open and too far away to
+unlock without a second hold.*
+
+<p>
+<img src="docs/screenshot-round.png" alt="PebbleKey on a Pebble Round 2" width="190">
+<img src="docs/screenshot-bw.png" alt="PebbleKey on a black-and-white Pebble 2" width="120">
+</p>
+
+*Pebble Round 2, and a black-and-white Pebble 2.*
 
 PebbleKey is a Pebble watchapp that talks to Volvo's
 [Connected Vehicle API](https://developer.volvocars.com/apis/connected-vehicle/v2/overview/).
@@ -15,8 +30,14 @@ app, and it sends commands straight to Volvo.
 | Hold SELECT (middle) | Climate on, or off if PebbleKey turned it on |
 | Hold DOWN | Lock |
 
-The line under the title shows what the car last reported: lock state, anything left open and
-battery level.
+The icons on the right sit next to the buttons they belong to. The rest of the screen shows
+what the car last reported:
+
+- **Badge:** green with a closed padlock when the car is locked, orange with an open one when it
+  is unlocked, grey until the car's state is known.
+- **Under the badge:** "Locked" or "Unlocked", or what is open ("Boot open"), and the battery
+  level.
+- **Bottom:** what PebbleKey is doing, the result, or the reason something failed.
 
 > **Status:** a personal project built for a Volvo EX30. It is young and lightly tested. Other
 > Volvo models that support the Connected Vehicle API should work but have not been tried.
@@ -32,7 +53,8 @@ battery level.
 | Who you trust | Volvo, and whoever runs the sign-in service | Volvo only |
 
 A build has "Sign in with Volvo" when [src/pkjs/broker.json](src/pkjs/broker.json) names a
-service. In this repository it is empty, so a plain build offers only the own-keys route.
+service. This repository and its ready-made build name the one run by the project's author. To
+use your own service, or none, see [Running a sign-in service](#running-a-sign-in-service).
 
 Either way you need a Pebble watch paired with the current Pebble phone app (all models, from
 the original Pebble to Pebble 2 Duo, Pebble Time 2 and Pebble Round 2) and a Volvo with an
@@ -41,9 +63,8 @@ active Volvo ID and remote services.
 ## Build and install
 
 **Ready-made build:** [dist/PebbleKey.pbw](dist/PebbleKey.pbw) is the watchapp built from this
-repository. Download it on your phone and open it with the Pebble app. It has no sign-in
-service, so it is for the own-keys route; skip to [installing](#install-on-the-watch) if you
-use it.
+repository. Download it on your phone and open it with the Pebble app. Both setup routes work
+with it; skip to [installing](#install-on-the-watch) if you use it.
 
 To build it yourself you need Python 3.8+, Node.js and [uv](https://docs.astral.sh/uv/).
 
@@ -117,8 +138,8 @@ If the last tap does nothing, copy the code shown below the button and paste it 
 | `conve:lock` | Lock (required) |
 | `conve:unlock` | Unlock (required) |
 | `conve:climatization_start_stop` | Climate on/off |
-| `conve:lock_status`, `conve:doors_status` | Lock state and open doors on the status line |
-| `conve:fuel_status`, `conve:battery_charge_level` | Battery level on the status line |
+| `conve:lock_status`, `conve:doors_status` | Lock state and open doors on the watch |
+| `conve:fuel_status`, `conve:battery_charge_level` | Battery level on the watch |
 | `location:read` | Distance check before unlocking |
 
 Only lock and unlock are required. Anything you leave out is simply missing in the app.
@@ -159,14 +180,16 @@ range (100 m, 200 m, 500 m or off) is in the settings. Lock and climate work fro
 
 **Climate.** Volvo's API cannot report whether climate is running, so the middle button goes by
 what PebbleKey last did: it stops climate if PebbleKey started it in the last 30 minutes,
-otherwise it starts it. If you switched climate from the Volvo app or the car in between, the
-first hold may do nothing visible; hold again.
+otherwise it starts it. The thermometer icon is lit while PebbleKey believes climate is on. If
+you switched climate from the Volvo app or the car in between, the first hold may do nothing
+visible; hold again.
 
-**Status line.** Read when the app opens and again a few seconds after a lock or unlock. It is
+**Car state.** Read when the app opens and again a few seconds after a lock or unlock. It is
 what the car last told Volvo, so it can lag behind the car.
 
-**Feedback.** A command takes a few seconds. The watch buzzes once on success and twice on
-failure, with the reason on screen.
+**Feedback.** A command takes a few seconds; a ring turns around the badge and the button's
+icon lights up meanwhile. The watch buzzes once on success and twice on failure, with the
+reason on screen.
 
 **Login lifetime.** Volvo limits a login to 3 months. When the watch says the login expired,
 sign in again (or run the login script again and paste the new code). Volvo also replaces the
@@ -235,7 +258,7 @@ cd broker && npx wrangler secret put VOLVO_API_KEY
 ```
 
 4. Point the watchapp at it and rebuild. Everyone who installs this build gets the
-   Sign in with Volvo button.
+   Sign in with Volvo button. (`python3 tools/set_broker.py --none` makes a build without it.)
 
 ```bash
 python3 tools/set_broker.py https://pebblekey.<your-name>.workers.dev

@@ -286,14 +286,13 @@ test('status: a part without its scope is left out, all parts failing is an erro
   assert.strictEqual((await status(none.volvo)).err, 'Not allowed (scopes?)');
 });
 
-test('status line formatting', function() {
-  var f = createVolvo.formatStatus;
-  assert.strictEqual(f({ locked: true, open: [], battery: 78 }), 'Locked, 78%');
-  assert.strictEqual(f({ locked: false, open: ['boot'], battery: 78 }), 'Unlocked, boot open');
-  assert.strictEqual(f({ locked: false, open: ['door', 'boot'], battery: null }), 'Unlocked, car open');
-  assert.strictEqual(f({ locked: null, open: null, battery: 5 }), '5%');
-  assert.strictEqual(f({ locked: true, open: null, battery: null }), 'Locked');
-  assert.strictEqual(f({ locked: null, open: null, battery: null }), '');
+test('car state as the watch draws it', function() {
+  var f = createVolvo.watchStatus;
+  assert.deepStrictEqual(f({ locked: true, open: [], battery: 78 }), { lock: 1, battery: 78, open: '' });
+  assert.deepStrictEqual(f({ locked: false, open: ['boot'], battery: 78 }), { lock: 2, battery: 78, open: 'Boot open' });
+  assert.deepStrictEqual(f({ locked: false, open: ['door', 'boot'], battery: null }), { lock: 2, battery: -1, open: 'Car open' });
+  assert.deepStrictEqual(f({ locked: null, open: null, battery: 5 }), { lock: 0, battery: 5, open: '' });
+  assert.deepStrictEqual(f({ locked: null, open: null, battery: 104 }), { lock: 0, battery: 100, open: '' });
 });
 
 test('car location: reads the GeoJSON point from the Location API', async function() {

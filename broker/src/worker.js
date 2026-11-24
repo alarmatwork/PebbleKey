@@ -103,34 +103,64 @@ async function openState(env, state, now) {
   }
 }
 
+// The pages share the watchapp's look: a round padlock badge, green once you are signed in.
 const STYLE = `
-  :root { color-scheme: light dark; }
-  body { font: 17px/1.5 system-ui, sans-serif; margin: 0; padding: 24px 16px;
-         background: #f4f5f7; color: #16181d; }
-  main { max-width: 440px; margin: 0 auto; }
-  h1 { font-size: 24px; margin: 0 0 12px; }
+  :root { color-scheme: light dark;
+          --page: #eceef2; --card: #fff; --ink: #14171c; --soft: #5b6270; --line: #dcdfe5;
+          --accent: #0a8a3a; --idle: #4a5160; --warn: #d4520c; --tip: #f1f8f3; }
+  * { box-sizing: border-box; }
+  body { font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0;
+         padding: 28px 16px 40px; background: var(--page); color: var(--ink);
+         -webkit-text-size-adjust: 100%; }
+  main { max-width: 420px; margin: 0 auto; padding: 28px 22px 22px; border-radius: 20px;
+         background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.08); }
+  .badge { --tone: var(--idle); width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 50%;
+           background: var(--tone); display: flex; align-items: center; justify-content: center; }
+  .badge.ok { --tone: var(--accent); }
+  .badge.warn { --tone: var(--warn); }
+  .badge svg { width: 38px; height: 38px; fill: #fff; }
+  .badge .cut { fill: var(--tone); }
+  .badge .line { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; }
+  h1 { font-size: 24px; line-height: 1.2; letter-spacing: -.01em; margin: 0 0 16px; text-align: center; }
   p { margin: 0 0 14px; }
-  .button { display: block; margin: 0 0 12px; padding: 14px 16px; border-radius: 10px;
-            background: #1c4fd8; color: #fff; text-align: center; text-decoration: none;
-            font-weight: 600; border: 0; font-size: 17px; width: 100%; box-sizing: border-box; }
-  .button small { display: block; font-weight: 400; opacity: .85; }
-  .quiet { background: transparent; color: inherit; border: 1px solid #8a8f98; }
-  .note { font-size: 15px; color: #555b66; }
-  textarea { width: 100%; box-sizing: border-box; height: 96px; font: 13px/1.4 ui-monospace, monospace;
-             border-radius: 8px; border: 1px solid #8a8f98; padding: 8px; margin: 0 0 12px;
-             background: transparent; color: inherit; }
-  hr { border: 0; border-top: 1px solid #c9ccd2; margin: 22px 0; }
+  .tip { padding: 12px 14px; border-radius: 12px; background: var(--tip); border-left: 4px solid var(--accent); }
+  .button { display: block; width: 100%; margin: 0 0 12px; padding: 15px 16px; border: 0;
+            border-radius: 14px; background: var(--accent); color: #fff; text-align: center;
+            text-decoration: none; font: inherit; font-weight: 600; cursor: pointer; }
+  .button:active { transform: scale(.98); }
+  .button small { display: block; font-size: 14px; font-weight: 400; opacity: .9; }
+  .quiet { background: transparent; color: inherit; border: 1px solid var(--line); }
+  .note { font-size: 15px; color: var(--soft); }
+  textarea { display: block; width: 100%; height: 96px; margin: 0 0 12px; padding: 10px;
+             font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;
+             border: 1px solid var(--line); border-radius: 12px; background: var(--page);
+             color: inherit; resize: none; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+  footer { max-width: 420px; margin: 16px auto 0; text-align: center; font-size: 13px; color: var(--soft); }
   @media (prefers-color-scheme: dark) {
-    body { background: #14161a; color: #eceef2; }
-    .note { color: #a4a9b3; }
-    .button { background: #4f7df3; }
-    .quiet { background: transparent; }
-    hr { border-top-color: #3a3e46; }
+    :root { --page: #0e1013; --card: #1a1d22; --ink: #eceef2; --soft: #a2a8b3; --line: #343841;
+            --accent: #17a34f; --idle: #555c6b; --warn: #e8651d; --tip: #17261d; }
+    main { box-shadow: none; }
   }
 `;
 
-function page(status, title, body, script) {
+const PADLOCK = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path class="line" d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>' +
+  '<rect x="4.5" y="10" width="15" height="10.5" rx="2.5"/>' +
+  '<circle class="cut" cx="12" cy="14.6" r="1.5"/><rect class="cut" x="11.2" y="14.6" width="1.6" height="3"/>' +
+  '</svg>';
+const WARNING = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+  '<rect x="10.6" y="4.5" width="2.8" height="10" rx="1.4"/><circle cx="12" cy="18.2" r="1.7"/></svg>';
+// Badge colour and icon for each kind of page.
+const TONES = {
+  idle: { css: '', icon: PADLOCK },
+  ok: { css: ' ok', icon: PADLOCK },
+  warn: { css: ' warn', icon: WARNING }
+};
+
+function page(status, title, body, script, tone) {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(16)));
+  const look = TONES[tone] || TONES.idle;
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -141,9 +171,11 @@ function page(status, title, body, script) {
 <style>${STYLE}</style>
 </head>
 <body><main>
+<div class="badge${look.css}">${look.icon}</div>
 <h1>${escapeHtml(title)}</h1>
 ${body}
-</main>${script ? `<script nonce="${nonce}">${script}</script>` : ''}</body>
+</main>
+<footer>PebbleKey is not affiliated with Volvo Cars.</footer>${script ? `<script nonce="${nonce}">${script}</script>` : ''}</body>
 </html>`;
   return new Response(html, {
     status,
@@ -163,7 +195,7 @@ ${body}
 
 function problem(status, text) {
   return page(status, 'Sign-in did not work',
-    `<p>${escapeHtml(text)}</p><a class="button" href="/">Start again</a>`);
+    `<p>${escapeHtml(text)}</p><a class="button" href="/">Start again</a>`, null, 'warn');
 }
 
 function json(status, data) {
@@ -181,8 +213,8 @@ function json(status, data) {
 function landing() {
   return page(200, 'PebbleKey', `
 <p>Sign in with your Volvo ID to let PebbleKey on your watch lock, unlock and pre-heat your car.</p>
-<p><strong>Tick "Remember me"</strong> on Volvo's sign-in page. Without it the watch is signed
-out again within hours.</p>
+<p class="tip"><strong>Tick "Remember me"</strong> on Volvo's sign-in page. Without it the watch
+is signed out again within hours.</p>
 <a class="button" href="/start">Continue to Volvo</a>
 <p class="note">Your password goes only to Volvo. This service passes the finished sign-in to
 your phone and stores nothing. Volvo ends every sign-in after 3 months; come back here then.</p>`);
@@ -324,7 +356,7 @@ document.addEventListener('click', function (event) {
   } else {
     oldWay();
   }
-});`);
+});`, 'ok');
 }
 
 async function refresh(request, env, fetcher) {
@@ -377,7 +409,8 @@ export function createBroker(deps = {}) {
     if (!env.VOLVO_CLIENT_ID || !env.VOLVO_CLIENT_SECRET || !env.VOLVO_API_KEY) {
       return url.pathname === '/refresh' ?
         json(500, { error: 'not_configured' }) :
-        page(500, 'Not set up', '<p>This sign-in service has not been given its Volvo keys yet.</p>');
+        page(500, 'Not set up', '<p>This sign-in service has not been given its Volvo keys yet.</p>',
+          null, 'warn');
     }
     try {
       if (url.pathname === '/refresh') {

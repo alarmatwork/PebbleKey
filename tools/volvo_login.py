@@ -37,10 +37,10 @@ SCOPES = {
     "conve:lock": "locking",
     "conve:unlock": "unlocking",
     "conve:climatization_start_stop": "climate on/off",
-    "conve:doors_status": "open doors on the info line",
-    "conve:lock_status": "lock state on the info line",
-    "conve:fuel_status": "battery level on the info line",
-    "conve:battery_charge_level": "battery level on the info line",
+    "conve:doors_status": "open doors on the watch",
+    "conve:lock_status": "lock state on the watch",
+    "conve:fuel_status": "battery level on the watch",
+    "conve:battery_charge_level": "battery level on the watch",
     "location:read": "distance check before unlocking",
 }
 REQUIRED_SCOPES = ("openid", "conve:lock", "conve:unlock")

@@ -25,7 +25,8 @@
         "parameters": {
           "domains": [
             "auth.volvocars.com",
-            "api.volvocars.com"
+            "api.volvocars.com",
+            "pebblekey.pebblekey.workers.dev"
           ]
         }
       },
@@ -48,7 +49,10 @@
       "JSReady",
       "Status",
       "Message",
-      "Info"
+      "Info",
+      "LockState",
+      "Battery",
+      "Climate"
     ],
     "resources": {
       "media": []

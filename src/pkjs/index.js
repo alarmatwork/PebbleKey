@@ -35,13 +35,22 @@ var proximity = createProximity({
   geolocation: typeof navigator !== 'undefined' ? navigator.geolocation : null
 });
 
-function tellWatch(status, message) {
-  Pebble.sendAppMessage({ Status: status, Message: String(message).slice(0, 40) },
+// Lock states as the watch draws them (see watchStatus in volvo.js).
+var LOCK_LOCKED = 1;
+var LOCK_UNLOCKED = 2;
+
+// `extra` carries car state that the result itself makes known, e.g. { LockState: LOCK_LOCKED }.
+function tellWatch(status, message, extra) {
+  var payload = { Status: status, Message: String(message).slice(0, 40) };
+  Object.keys(extra || {}).forEach(function(key) {
+    payload[key] = extra[key];
+  });
+  Pebble.sendAppMessage(payload,
     function() {},
     function() { console.log('Could not reach the watch: ' + message); });
 }
 
-// Ask Volvo what the car last reported and show it on the watch's info line.
+// Ask Volvo what the car last reported and show it on the watch.
 function refreshStatus() {
   if (!volvo.isConfigured()) {
     return;
@@ -51,10 +60,13 @@ function refreshStatus() {
       console.log('Status failed: ' + err);
       return;
     }
-    var line = createVolvo.formatStatus(status);
-    if (line) {
-      Pebble.sendAppMessage({ Info: line });
-    }
+    var state = createVolvo.watchStatus(status);
+    Pebble.sendAppMessage({
+      LockState: state.lock,
+      Battery: state.battery,
+      Info: state.open,
+      Climate: volvo.climateIsOn() ? 1 : 0
+    });
   });
 }
 
@@ -97,7 +109,7 @@ function runClimate() {
       console.log('climate failed: ' + err);
       tellWatch(STATUS_ERROR, err);
     } else {
-      tellWatch(STATUS_OK, isOn ? 'Climate on' : 'Climate off');
+      tellWatch(STATUS_OK, isOn ? 'Climate on' : 'Climate off', { Climate: isOn ? 1 : 0 });
     }
   });
 }
@@ -115,11 +127,11 @@ function run(command) {
       return;
     }
     if (command === 'lock') {
-      tellWatch(STATUS_OK, 'Locked');
+      tellWatch(STATUS_OK, 'Locked', { LockState: LOCK_LOCKED });
     } else if (data.readyToUnlock && data.readyToUnlockUntil) {
       tellWatch(STATUS_OK, 'Unlocked for ' + data.readyToUnlockUntil + ' s');
     } else {
-      tellWatch(STATUS_OK, 'Unlocked');
+      tellWatch(STATUS_OK, 'Unlocked', { LockState: LOCK_UNLOCKED });
     }
     // Give the car a moment to report its new state before reading it back.
     setTimeout(refreshStatus, STATUS_REFRESH_DELAY_MS);
