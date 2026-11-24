@@ -170,9 +170,14 @@ shows "Setup saved" and, a moment later, the car's status.
 
 ## Quick launch (optional)
 
-On the watch, **Settings > Quick Launch** lets you open PebbleKey by holding a button on the
-watchface. Opening the app never does anything by itself: release the button, then hold UP,
-SELECT or DOWN.
+Quick Launch opens PebbleKey when you hold a button on the watchface, so the car is two holds
+away: one to open the app, one to lock or unlock.
+
+- **In the Pebble phone app:** **Settings > Watch > Quick Launch**, pick a button and choose
+  PebbleKey.
+- **Or on the watch:** **Settings > Quick Launch**.
+
+Opening the app never does anything by itself: release the button, then hold UP, SELECT or DOWN.
 
 ## How it behaves
 

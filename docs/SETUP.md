@@ -89,6 +89,18 @@ off, in PebbleKey's settings.
 
 <img src="screenshot-away.png" alt="The watch asking for a second hold because the car is 2.3 km away" width="200">
 
+## 8. Optional: open it with one long press
+
+Quick Launch opens PebbleKey when you hold a button on the watchface, so you do not have to go
+through the app menu.
+
+In the Pebble app on your phone, open **Settings > Watch > Quick Launch**, pick the button you
+want and choose PebbleKey. The same setting is on the watch itself, under
+**Settings > Quick Launch**.
+
+Holding that button only opens PebbleKey. Nothing is sent to the car until you release it and
+hold UP, SELECT or DOWN.
+
 ## Later on
 
 - **"Login expired, sign in again":** Volvo ends every sign-in after 3 months. Repeat steps 2
