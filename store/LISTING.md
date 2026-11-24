@@ -1,7 +1,7 @@
 # Pebble Appstore listing
 
-Everything needed to list PebbleKey for Volvo in the Pebble Appstore. Nothing here is submitted
-yet.
+The material behind PebbleKey for Volvo's listing in the Pebble Appstore:
+https://apps.repebble.com/17029805a6d84b6295f32a36
 
 ## Before you list it publicly
 

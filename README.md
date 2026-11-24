@@ -2,6 +2,9 @@
 
 Lock, unlock and pre-heat a Volvo from a Pebble watch.
 
+**[Install it from the Pebble Appstore](https://apps.repebble.com/17029805a6d84b6295f32a36)**.
+This is the official way to install PebbleKey, and the Pebble app keeps it up to date.
+
 <p>
 <img src="docs/screenshot.png" alt="Car locked, battery at 78%" width="170">
 <img src="docs/screenshot-busy.png" alt="Unlocking, with a ring turning around the badge" width="170">
@@ -23,10 +26,12 @@ extra phone app to install: it runs inside the Pebble app you already have and t
 You need a Pebble watch paired with the Pebble app on your phone, and the Volvo ID you use in
 the Volvo Cars app. It takes about five minutes.
 
-1. **Install.** On your phone, download
+1. **Install.** On your phone, open
+   [PebbleKey for Volvo in the Pebble Appstore](https://apps.repebble.com/17029805a6d84b6295f32a36)
+   and install it from there. Allow PebbleKey internet access and location when the Pebble app
+   asks. (Without the store: download
    [PebbleKey.pbw](https://github.com/alarmatwork/PebbleKey/raw/main/dist/PebbleKey.pbw) and
-   open the file with the Pebble app. Allow PebbleKey internet access and location when the
-   Pebble app asks.
+   open the file with the Pebble app. That copy does not update itself.)
 2. **Open PebbleKey on the watch** and leave it open.
 3. **Tap Sign in with Volvo** in PebbleKey's settings in the Pebble app. Your browser opens.
 4. **Sign in.** Continue to Volvo, tick **Remember me**, sign in and approve the access

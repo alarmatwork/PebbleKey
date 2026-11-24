@@ -14,9 +14,13 @@ sign-in service, follow [the own-keys route](../README.md#set-up-your-own-volvo-
 
 ## 1. Install PebbleKey on the watch
 
-On your phone, download
+On your phone, open
+[PebbleKey for Volvo in the Pebble Appstore](https://apps.repebble.com/17029805a6d84b6295f32a36)
+and install it from there. The Pebble app installs it on your watch and keeps it up to date.
+
+Without the store: download
 [PebbleKey.pbw](https://github.com/alarmatwork/PebbleKey/raw/main/dist/PebbleKey.pbw) and open
-the downloaded file with the Pebble app. The Pebble app installs it on your watch.
+the downloaded file with the Pebble app. That copy does not update itself.
 
 The Pebble app asks you to allow two things for PebbleKey:
 
