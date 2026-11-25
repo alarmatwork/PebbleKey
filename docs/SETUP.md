@@ -57,7 +57,7 @@ You are now on Volvo's own page, at `volvocars.com`. Your password goes only to 
 1. Enter your Volvo ID email and password.
 2. Tick **Remember me**. Without it the watch is signed out again within hours.
 3. Approve the access PebbleKey asks for: locking and unlocking, climate, and reading the car's
-   lock state, battery level and position.
+   lock state, battery level, charging and position.
 
 ## 6. Finish in the Pebble app
 

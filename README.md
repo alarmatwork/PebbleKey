@@ -64,8 +64,9 @@ what the car last reported:
 - **Badge:** green with a closed padlock when the car is locked, orange with an open one when it
   is unlocked, grey until the car's state is known.
 - **Under the badge:** "Locked" or "Unlocked", or what is open ("Boot open"), and the battery
-  level.
-- **Bottom:** what PebbleKey is doing, the result, or the reason something failed.
+  level, with a lightning bolt in front of it while the car is charging.
+- **Bottom:** what PebbleKey is doing, the result, or the reason something failed. While the car
+  charges and nothing else is going on, the charge target and the time left.
 
 The screenshots at the top are from a Pebble Time 2: locked; unlocking; unlocked with climate
 on; boot open and too far away to unlock without a second hold. It looks like this on a Pebble
@@ -162,6 +163,7 @@ The Pebble phone app will ask you to allow PebbleKey:
 | `conve:climatization_start_stop` | Climate on/off |
 | `conve:lock_status`, `conve:doors_status` | Lock state and open doors on the watch |
 | `conve:fuel_status`, `conve:battery_charge_level` | Battery level on the watch |
+| `energy:state:read` | Charging and time left on the watch |
 | `location:read` | Distance check before unlocking |
 
 Only lock and unlock are required. Anything you leave out is simply missing in the app.
@@ -214,12 +216,23 @@ visible; hold again.
 **Car state.** Read when the app opens and again a few seconds after a lock or unlock. It is
 what the car last told Volvo, so it can lag behind the car.
 
+**Charging.** While the car charges, the bottom of the screen shows the charge target and the
+time left, such as "Charging to 80%, 1 h 20 min left". It also says when charging is done or
+scheduled. This needs a sign-in made with version 1.1 or later: if you signed in before that,
+tap **Sign in with Volvo** again (or run the login script again). Until then everything else
+works as before.
+
+<p>
+<img src="docs/screenshot-charging.png" alt="Car locked and charging to 80%, 1 h 20 min left" width="170">
+</p>
+
 **Feedback.** A command takes a few seconds; a ring turns around the badge and the button's
 icon lights up meanwhile. The watch buzzes once on success and twice on failure, with the
 reason on screen.
 
-**Login lifetime.** Volvo limits a login to 3 months. When the watch says the login expired,
-sign in again (or run the login script again and paste the new code). Volvo also replaces the
+**Login lifetime.** Volvo limits a login to 3 months. Once it has run out, the watch buzzes
+twice and says so as soon as you open PebbleKey. Then sign in again (or run the login script
+again and paste the new code). Volvo also replaces the
 login token every time it is used, so a setup code stops working once the watch has sent its
 first command.
 

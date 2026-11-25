@@ -15,6 +15,7 @@ var STATUS_PROGRESS = 0;
 var STATUS_OK = 1;
 var STATUS_ERROR = 2;
 var STATUS_CONFIRM = 3;
+var STATUS_NOTICE = 4;
 var DEFAULT_UNLOCK_RANGE_M = 200;
 
 // The sign-in service this build uses (see broker/), or '' for a build without one.
@@ -58,6 +59,10 @@ function refreshStatus() {
   volvo.getStatus(function(err, status) {
     if (err) {
       console.log('Status failed: ' + err);
+      if (createVolvo.isLoginExpired(err)) {
+        // Say so right away, rather than only once the user holds a button.
+        tellWatch(STATUS_NOTICE, err);
+      }
       return;
     }
     var state = createVolvo.watchStatus(status);
@@ -65,7 +70,9 @@ function refreshStatus() {
       LockState: state.lock,
       Battery: state.battery,
       Info: state.open,
-      Climate: volvo.climateIsOn() ? 1 : 0
+      Climate: volvo.climateIsOn() ? 1 : 0,
+      Charging: state.charging,
+      ChargeInfo: state.charge
     });
   });
 }

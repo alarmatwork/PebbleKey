@@ -41,6 +41,7 @@ SCOPES = {
     "conve:lock_status": "lock state on the watch",
     "conve:fuel_status": "battery level on the watch",
     "conve:battery_charge_level": "battery level on the watch",
+    "energy:state:read": "charging and time left on the watch",
     "location:read": "distance check before unlocking",
 }
 REQUIRED_SCOPES = ("openid", "conve:lock", "conve:unlock")

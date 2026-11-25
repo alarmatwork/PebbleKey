@@ -2,12 +2,14 @@
 // Written in ES5 with callbacks so it runs in every PebbleKit JS runtime.
 //
 // Endpoints and flow follow https://developer.volvocars.com/apis/docs/authorisation
-// and .../connected-vehicle/v2/endpoints/doors-windows-locks, .../location/v1/endpoints/location
+// and .../connected-vehicle/v2/endpoints/doors-windows-locks, .../location/v1/endpoints/location,
+// .../energy/v2/endpoints/energy-state
 
 var TOKEN_URL = 'https://auth.volvocars.com/realms/volvocars/protocol/openid-connect/token';
 var API_HOST = 'https://api.volvocars.com/';
 var CONNECTED_VEHICLE = 'connected-vehicle/v2';
 var LOCATION = 'location/v1';
+var ENERGY = 'energy/v2';
 
 // Two kinds of setup code:
 //   EX30K1 comes from tools/volvo_login.py and carries your own Volvo application's client
@@ -26,6 +28,9 @@ var EXPIRY_MARGIN_MS = 30000;
 // The car ends a remote climate run by itself after this long. Volvo's API has no way to ask
 // whether climate is running, so the toggle goes by what this app last did.
 var CLIMATE_RUN_MS = 30 * 60 * 1000;
+// A login made before this app asked for the energy scope is refused by the Energy API. That
+// stays so until the user signs in again, so the app asks again only this often.
+var ENERGY_RETRY_MS = 24 * 60 * 60 * 1000;
 
 var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -72,9 +77,14 @@ var INVOKE_ERRORS = {
   NOT_ALLOWED_WRONG_USAGE_MODE: 'Car is in use'
 };
 
+var NOT_ALLOWED = 'Not allowed (scopes?)';
+// Volvo no longer accepts the login: after 3 months at the latest, the user has to sign in again.
+var LOGIN_EXPIRED_SIGN_IN = 'Login expired, sign in again';
+var LOGIN_EXPIRED_OWN_KEYS = 'Login expired, redo setup';
+
 var HTTP_ERRORS = {
   400: 'Bad request',
-  403: 'Not allowed (scopes?)',
+  403: NOT_ALLOWED,
   404: 'Car not found (VIN?)',
   415: 'Bad content type',
   422: 'Not supported by car',
@@ -251,11 +261,11 @@ module.exports = function createVolvo(deps) {
         settle(noAnswerMessage(text));
       } else if (creds.broker) {
         // The service answers invalid_grant only when Volvo no longer accepts the login.
-        settle(json.error === 'invalid_grant' ? 'Login expired, sign in again' :
+        settle(json.error === 'invalid_grant' ? LOGIN_EXPIRED_SIGN_IN :
           'Sign-in service error ' + status);
       } else if (status === 400 || status === 401) {
         // invalid_grant: refresh token expired or already used; invalid_client: bad secret.
-        settle(json.error === 'invalid_client' ? 'Bad client secret' : 'Login expired, redo setup');
+        settle(json.error === 'invalid_client' ? 'Bad client secret' : LOGIN_EXPIRED_OWN_KEYS);
       } else {
         settle('Volvo login error ' + status);
       }
@@ -287,7 +297,7 @@ module.exports = function createVolvo(deps) {
   /**
    * Authenticated call to the car's API, with one retry on a rejected token.
    * @param {string} method - 'GET' or 'POST'
-   * @param {string} service - CONNECTED_VEHICLE or LOCATION
+   * @param {string} service - CONNECTED_VEHICLE, LOCATION or ENERGY
    * @param {string} path - path below /vehicles/{vin}/
    * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, responseData)
    */
@@ -320,7 +330,9 @@ module.exports = function createVolvo(deps) {
           } else if (status < 200 || status >= 300) {
             cb(HTTP_ERRORS[status] || ('Volvo error ' + status));
           } else {
-            cb(null, parseJson(text).data || {});
+            // The Energy API answers with the values themselves, the others wrap them in `data`.
+            var json = parseJson(text);
+            cb(null, json.data || json);
           }
         });
     });
@@ -351,14 +363,71 @@ module.exports = function createVolvo(deps) {
     return !!entry && (entry.value === 'OPEN' || entry.value === 'AJAR');
   }
 
+  // The value of one Energy API resource, or null if the car could not supply it.
+  function energyValue(entry) {
+    return entry && entry.status !== 'ERROR' && entry.value !== undefined ? entry.value : null;
+  }
+
+  function percentOrNull(value) {
+    var percent = Number(value);
+    return value === null || value === undefined || isNaN(percent) ? null : Math.round(percent);
+  }
+
+  // Charging as the Energy API reports it, or null when there is nothing to show.
+  function chargeFrom(data) {
+    var state = energyValue(data.chargingStatus);
+    if (state !== 'CHARGING' && state !== 'DONE' && state !== 'SCHEDULED') {
+      return null;
+    }
+    if (state !== 'CHARGING' && energyValue(data.chargerConnectionStatus) === 'DISCONNECTED') {
+      return null;
+    }
+    var minutes = Number(energyValue(data.estimatedChargingTimeToTargetBatteryChargeLevel));
+    var target = percentOrNull(energyValue(data.targetBatteryChargeLevel));
+    return {
+      state: state,
+      minutes: state === 'CHARGING' && minutes > 0 ? Math.round(minutes) : null,
+      target: target !== null && target > 0 && target <= 100 ? target : null
+    };
+  }
+
+  /**
+   * Battery level and charging from the Energy API.
+   * @param {function(Object|null)} cb - cb({battery: number|null, charge: Object|null}), or
+   *   cb(null) when the Energy API could not be read
+   */
+  function getEnergy(cb) {
+    var deniedAt = (load(CREDS_KEY) || {}).energyDeniedAt;
+    if (deniedAt && now() - deniedAt < ENERGY_RETRY_MS) {
+      cb(null);
+      return;
+    }
+    api('GET', ENERGY, 'state', function(err, data) {
+      if (err) {
+        var creds = load(CREDS_KEY);
+        if (err === NOT_ALLOWED && creds) {
+          creds.energyDeniedAt = now();
+          save(CREDS_KEY, creds);
+        }
+        cb(null);
+        return;
+      }
+      cb({
+        battery: percentOrNull(energyValue(data.batteryChargeLevel)),
+        charge: chargeFrom(data)
+      });
+    });
+  }
+
   /**
    * What the car last reported. Each part needs its own scopes on the Volvo application, so a
    * part that cannot be read is left null rather than failing the whole status.
    * @param {function(string|null, Object=)} cb - cb(errorText) only if nothing could be read,
-   *   else cb(null, {locked: boolean|null, open: string[]|null, battery: number|null})
+   *   else cb(null, {locked: boolean|null, open: string[]|null, battery: number|null,
+   *   charge: {state: string, minutes: number|null, target: number|null}|null})
    */
   function getStatus(cb) {
-    var status = { locked: null, open: null, battery: null };
+    var status = { locked: null, open: null, battery: null, charge: null };
     var pending = 2;
     var errors = [];
     function done(err) {
@@ -390,14 +459,23 @@ module.exports = function createVolvo(deps) {
       done(err);
     });
 
-    api('GET', CONNECTED_VEHICLE, 'fuel', function(err, data) {
-      if (!err) {
-        var level = data.batteryChargeLevel && data.batteryChargeLevel.value;
-        var percent = Number(level);
-        status.battery = level === null || level === undefined || isNaN(percent) ?
-          null : Math.round(percent);
+    // The Energy API gives the battery level and charging in one call. Without it (an older
+    // login, or a car it does not cover) the battery level comes from the Connected Vehicle API.
+    getEnergy(function(energy) {
+      if (energy) {
+        status.battery = energy.battery;
+        status.charge = energy.charge;
       }
-      done(err);
+      if (status.battery !== null) {
+        done(null);
+        return;
+      }
+      api('GET', CONNECTED_VEHICLE, 'fuel', function(err, data) {
+        if (!err) {
+          status.battery = percentOrNull(data.batteryChargeLevel && data.batteryChargeLevel.value);
+        }
+        done(err);
+      });
     });
   }
 
@@ -452,11 +530,38 @@ module.exports = function createVolvo(deps) {
   };
 };
 
+// 45 -> "45 min", 80 -> "1 h 20 min", 120 -> "2 h"
+function duration(minutes) {
+  var hours = Math.floor(minutes / 60);
+  var rest = minutes % 60;
+  if (!hours) {
+    return rest + ' min';
+  }
+  return hours + ' h' + (rest ? ' ' + rest + ' min' : '');
+}
+
+// The lines the watch shows while idle, e.g. "Charging to 80%\n1 h 20 min left", or ''.
+function chargeText(charge) {
+  if (!charge) {
+    return '';
+  }
+  if (charge.state === 'DONE') {
+    return 'Charging done';
+  }
+  if (charge.state === 'SCHEDULED') {
+    return 'Charging scheduled';
+  }
+  return 'Charging' + (charge.target ? ' to ' + charge.target + '%' : '') +
+    (charge.minutes ? '\n' + duration(charge.minutes) + ' left' : '');
+}
+
 /**
  * The car's state in the form the watch draws it.
  * @param {Object} status - result of getStatus()
- * @returns {{lock: number, battery: number, open: string}} lock is 0 unknown, 1 locked,
- *   2 unlocked; battery is a percentage or -1; open names what is open, e.g. "Boot open", or ''
+ * @returns {{lock: number, battery: number, open: string, charging: number, charge: string}}
+ *   lock is 0 unknown, 1 locked, 2 unlocked; battery is a percentage or -1; open names what is
+ *   open, e.g. "Boot open", or ''; charging is 1 while the car charges; charge is the text
+ *   about charging, or ''
  */
 function watchStatus(status) {
   var open = '';
@@ -468,10 +573,18 @@ function watchStatus(status) {
   return {
     lock: status.locked === null ? 0 : status.locked ? 1 : 2,
     battery: battery === null ? -1 : Math.max(0, Math.min(100, battery)),
-    open: open
+    open: open,
+    charging: status.charge && status.charge.state === 'CHARGING' ? 1 : 0,
+    charge: chargeText(status.charge)
   };
 }
 
+/** Whether an error text from this module means that the user has to sign in again. */
+function isLoginExpired(err) {
+  return err === LOGIN_EXPIRED_SIGN_IN || err === LOGIN_EXPIRED_OWN_KEYS;
+}
+
 module.exports.watchStatus = watchStatus;
+module.exports.isLoginExpired = isLoginExpired;
 module.exports.base64Encode = base64Encode;
 module.exports.base64Decode = base64Decode;

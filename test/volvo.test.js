@@ -86,7 +86,11 @@ function backend(opts) {
     if (req.method === 'GET') {
       var name = req.url.split('/').pop();
       var canned = (opts.status || {})[name];
-      return canned ? { status: 200, body: { data: canned } } : { status: 403, body: {} };
+      if (!canned) {
+        return { status: 403, body: {} };
+      }
+      // The Energy API ("state") answers with the values themselves, the others wrap them.
+      return { status: 200, body: name === 'state' ? canned : { data: canned } };
     }
     return { status: 200, body: { data: { vin: 'YV1ABCDEFGH123456', invokeStatus: opts.invokeStatus || 'COMPLETED' } } };
   };
@@ -266,7 +270,7 @@ test('status: reads lock state, open doors and battery', async function() {
   s.volvo.importSetupCode(setupCode('rt-0'));
   var result = await status(s.volvo);
   assert.strictEqual(result.err, null);
-  assert.deepStrictEqual(result.status, { locked: false, open: ['boot'], battery: 78 });
+  assert.deepStrictEqual(result.status, { locked: false, open: ['boot'], battery: 78, charge: null });
   var doors = s.log.filter(function(r) { return /\/doors$/.test(r.url); })[0];
   assert.strictEqual(doors.method, 'GET');
   assert.strictEqual(doors.body, null);
@@ -279,20 +283,145 @@ test('status: a part without its scope is left out, all parts failing is an erro
   partial.volvo.importSetupCode(setupCode('rt-0'));
   var result = await status(partial.volvo);
   assert.strictEqual(result.err, null);
-  assert.deepStrictEqual(result.status, { locked: true, open: [], battery: null });
+  assert.deepStrictEqual(result.status, { locked: true, open: [], battery: null, charge: null });
 
   var none = setup();
   none.volvo.importSetupCode(setupCode('rt-0'));
   assert.strictEqual((await status(none.volvo)).err, 'Not allowed (scopes?)');
 });
 
+test('status: an expired login is reported as such, other failures are not', async function() {
+  var expired = setup({ status: { doors: { centralLock: { value: 'LOCKED' } } } });
+  expired.volvo.importSetupCode(setupCode('rt-stale'));
+  var err = (await status(expired.volvo)).err;
+  assert.strictEqual(err, 'Login expired, redo setup');
+  assert.strictEqual(createVolvo.isLoginExpired(err), true);
+  assert.strictEqual(createVolvo.isLoginExpired('Login expired, sign in again'), true);
+
+  var offline = setup({ offline: true });
+  offline.volvo.importSetupCode(setupCode('rt-0'));
+  err = (await status(offline.volvo)).err;
+  assert.strictEqual(err, 'No internet on phone');
+  assert.strictEqual(createVolvo.isLoginExpired(err), false);
+  assert.strictEqual(createVolvo.isLoginExpired(null), false);
+});
+
 test('car state as the watch draws it', function() {
   var f = createVolvo.watchStatus;
-  assert.deepStrictEqual(f({ locked: true, open: [], battery: 78 }), { lock: 1, battery: 78, open: '' });
-  assert.deepStrictEqual(f({ locked: false, open: ['boot'], battery: 78 }), { lock: 2, battery: 78, open: 'Boot open' });
-  assert.deepStrictEqual(f({ locked: false, open: ['door', 'boot'], battery: null }), { lock: 2, battery: -1, open: 'Car open' });
-  assert.deepStrictEqual(f({ locked: null, open: null, battery: 5 }), { lock: 0, battery: 5, open: '' });
-  assert.deepStrictEqual(f({ locked: null, open: null, battery: 104 }), { lock: 0, battery: 100, open: '' });
+  var idle = { charging: 0, charge: '' };
+  assert.deepStrictEqual(f({ locked: true, open: [], battery: 78 }), { lock: 1, battery: 78, open: '', ...idle });
+  assert.deepStrictEqual(f({ locked: false, open: ['boot'], battery: 78 }), { lock: 2, battery: 78, open: 'Boot open', ...idle });
+  assert.deepStrictEqual(f({ locked: false, open: ['door', 'boot'], battery: null }), { lock: 2, battery: -1, open: 'Car open', ...idle });
+  assert.deepStrictEqual(f({ locked: null, open: null, battery: 5 }), { lock: 0, battery: 5, open: '', ...idle });
+  assert.deepStrictEqual(f({ locked: null, open: null, battery: 104 }), { lock: 0, battery: 100, open: '', ...idle });
+});
+
+test('charging as the watch draws it', function() {
+  function f(charge) {
+    var state = createVolvo.watchStatus({ locked: true, open: [], battery: 50, charge: charge });
+    return [state.charging, state.charge];
+  }
+  assert.deepStrictEqual(f(null), [0, '']);
+  assert.deepStrictEqual(f({ state: 'CHARGING', minutes: 80, target: 80 }), [1, 'Charging to 80%\n1 h 20 min left']);
+  assert.deepStrictEqual(f({ state: 'CHARGING', minutes: 45, target: null }), [1, 'Charging\n45 min left']);
+  assert.deepStrictEqual(f({ state: 'CHARGING', minutes: 120, target: 100 }), [1, 'Charging to 100%\n2 h left']);
+  assert.deepStrictEqual(f({ state: 'CHARGING', minutes: null, target: 90 }), [1, 'Charging to 90%']);
+  assert.deepStrictEqual(f({ state: 'DONE', minutes: null, target: 80 }), [0, 'Charging done']);
+  assert.deepStrictEqual(f({ state: 'SCHEDULED', minutes: null, target: 80 }), [0, 'Charging scheduled']);
+  // The longest text has to fit the watch's 40-byte buffer.
+  assert.ok(f({ state: 'CHARGING', minutes: 59 * 60 + 59, target: 100 })[1].length < 40);
+});
+
+function energyState(overrides) {
+  var state = {
+    batteryChargeLevel: { status: 'OK', value: 61.4, unit: 'percentage' },
+    chargerConnectionStatus: { status: 'OK', value: 'CONNECTED' },
+    chargingStatus: { status: 'OK', value: 'CHARGING' },
+    estimatedChargingTimeToTargetBatteryChargeLevel: { status: 'OK', value: 95, unit: 'minutes' },
+    targetBatteryChargeLevel: { status: 'OK', value: 80, unit: 'percentage' },
+    chargingCurrentLimit: { status: 'ERROR', code: 'NOT_SUPPORTED', message: 'Not available' }
+  };
+  Object.keys(overrides || {}).forEach(function(key) { state[key] = overrides[key]; });
+  return state;
+}
+
+function requests(s, ending) {
+  return s.log.filter(function(r) { return r.url.slice(-ending.length) === ending; });
+}
+
+test('status: battery and charging come from the Energy API in one call', async function() {
+  var s = setup({ status: {
+    doors: { centralLock: { value: 'LOCKED' } },
+    state: energyState(),
+    fuel: { batteryChargeLevel: { value: 12 } }
+  } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  var result = await status(s.volvo);
+  assert.strictEqual(result.err, null);
+  assert.deepStrictEqual(result.status, {
+    locked: true, open: [], battery: 61, charge: { state: 'CHARGING', minutes: 95, target: 80 }
+  });
+  var energy = requests(s, '/state')[0];
+  assert.strictEqual(energy.url, 'https://api.volvocars.com/energy/v2/vehicles/YV1ABCDEFGH123456/state');
+  assert.strictEqual(energy.headers['vcc-api-key'], 'apikey');
+  assert.strictEqual(requests(s, '/fuel').length, 0);
+});
+
+test('status: what the Energy API reports about charging', async function() {
+  async function charge(overrides) {
+    var s = setup({ status: { state: energyState(overrides) } });
+    s.volvo.importSetupCode(setupCode('rt-0'));
+    return (await status(s.volvo)).status.charge;
+  }
+  assert.strictEqual(await charge({ chargingStatus: { status: 'OK', value: 'IDLE' } }), null);
+  assert.strictEqual(await charge({ chargingStatus: { status: 'ERROR', code: 'X' } }), null);
+  assert.deepStrictEqual(await charge({ chargingStatus: { status: 'OK', value: 'DONE' } }),
+    { state: 'DONE', minutes: null, target: 80 });
+  assert.deepStrictEqual(await charge({ chargingStatus: { status: 'OK', value: 'SCHEDULED' } }),
+    { state: 'SCHEDULED', minutes: null, target: 80 });
+  // Finished and unplugged: nothing left to say.
+  assert.strictEqual(await charge({
+    chargingStatus: { status: 'OK', value: 'DONE' },
+    chargerConnectionStatus: { status: 'OK', value: 'DISCONNECTED' }
+  }), null);
+  // The car charges but gives no time or target.
+  assert.deepStrictEqual(await charge({
+    estimatedChargingTimeToTargetBatteryChargeLevel: { status: 'ERROR', code: 'X' },
+    targetBatteryChargeLevel: { status: 'OK', value: 0 }
+  }), { state: 'CHARGING', minutes: null, target: null });
+});
+
+test('status: falls back to the Connected Vehicle API for the battery level', async function() {
+  // The Energy API answers but has no battery level for this car.
+  var s = setup({ status: {
+    state: energyState({ batteryChargeLevel: { status: 'ERROR', code: 'X' } }),
+    fuel: { batteryChargeLevel: { value: 33 } }
+  } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  var result = (await status(s.volvo)).status;
+  assert.strictEqual(result.battery, 33);
+  assert.strictEqual(result.charge.state, 'CHARGING');
+});
+
+test('status: a login without the energy scope is asked again only once a day', async function() {
+  var s = setup({ status: { fuel: { batteryChargeLevel: { value: 40 } } } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  assert.deepStrictEqual((await status(s.volvo)).status, { locked: null, open: null, battery: 40, charge: null });
+  await status(s.volvo);
+  assert.strictEqual(requests(s, '/state').length, 1);
+  assert.strictEqual(requests(s, '/fuel').length, 2);
+
+  s.clock.t += 25 * 60 * 60 * 1000;
+  await status(s.volvo);
+  assert.strictEqual(requests(s, '/state').length, 2);
+
+  // Signing in again clears it at once.
+  var again = setup({ status: { fuel: { batteryChargeLevel: { value: 40 } } } });
+  again.volvo.importSetupCode(setupCode('rt-0'));
+  await status(again.volvo);
+  again.volvo.importSetupCode(setupCode('rt-1'));
+  await status(again.volvo);
+  assert.strictEqual(requests(again, '/state').length, 2);
 });
 
 test('car location: reads the GeoJSON point from the Location API', async function() {

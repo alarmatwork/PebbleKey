@@ -11,6 +11,7 @@
 #define STATUS_OK 1
 #define STATUS_ERROR 2
 #define STATUS_CONFIRM 3  // phone is not near the car; ask for a second hold to unlock
+#define STATUS_NOTICE 4  // something the user should know although no command is running
 
 #define HOLD_MS 700
 #define REPLY_TIMEOUT_MS 75000
@@ -46,6 +47,10 @@ static int s_battery = -1;
 static bool s_climate_on;
 // What is open, e.g. "Boot open"; empty when everything is shut.
 static char s_open_text[24];
+static bool s_charging;
+// What to say about charging, e.g. "Charging to 80%\n1 h 20 min left"; empty when there is
+// nothing to say.
+static char s_charge_text[40];
 
 static bool s_js_ready;
 static bool s_busy;
@@ -205,6 +210,15 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
     strncpy(s_open_text, info->value->cstring, sizeof(s_open_text) - 1);
     s_open_text[sizeof(s_open_text) - 1] = '\0';
   }
+  Tuple *charging = dict_find(iter, MESSAGE_KEY_Charging);
+  if (charging) {
+    s_charging = charging->value->int32 != 0;
+  }
+  Tuple *charge = dict_find(iter, MESSAGE_KEY_ChargeInfo);
+  if (charge) {
+    strncpy(s_charge_text, charge->value->cstring, sizeof(s_charge_text) - 1);
+    s_charge_text[sizeof(s_charge_text) - 1] = '\0';
+  }
   redraw();
 
   Tuple *status = dict_find(iter, MESSAGE_KEY_Status);
@@ -225,6 +239,14 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
       break;
     case STATUS_CONFIRM:
       ask_confirmation(text);
+      break;
+    case STATUS_NOTICE:
+      // A running command reports its own result, so it is not interrupted.
+      if (!s_busy) {
+        set_confirming(false);
+        set_phase(PHASE_ERROR, text);
+        vibes_double_pulse();
+      }
       break;
     default:
       finish(false, text);
@@ -413,16 +435,42 @@ static int16_t text_width(const char *text, GFont font) {
                                                GTextAlignmentLeft).w;
 }
 
-// A battery outline filled to the car's charge level, with the percentage beside it.
+// A lightning bolt about as tall as the battery outline, in two sizes. Each row is the start
+// and the width of its filled pixels; a shape this thin comes out ragged as a filled path.
+static const uint8_t BOLT_SMALL[][2] = {
+  {4, 2}, {3, 2}, {2, 3}, {1, 3}, {1, 6}, {0, 6}, {3, 3}, {2, 3}, {2, 2}, {1, 2}, {1, 1},
+};
+static const uint8_t BOLT_BIG[][2] = {
+  {6, 2}, {5, 2}, {4, 3}, {3, 3}, {2, 4}, {1, 4}, {1, 8}, {0, 8},
+  {4, 4}, {4, 3}, {3, 3}, {3, 2}, {2, 2}, {2, 1}, {1, 1},
+};
+
+static void draw_bolt(GContext *ctx, int16_t x, int16_t y, bool big) {
+  const uint8_t (*rows)[2] = big ? BOLT_BIG : BOLT_SMALL;
+  int16_t count = big ? ARRAY_LENGTH(BOLT_BIG) : ARRAY_LENGTH(BOLT_SMALL);
+  graphics_context_set_fill_color(ctx, ON_COLOR(GColorYellow, GColorWhite));
+  for (int16_t i = 0; i < count; i++) {
+    graphics_fill_rect(ctx, GRect(x + rows[i][0], y + i, rows[i][1], 1), 0, GCornerNone);
+  }
+}
+
+// A battery outline filled to the car's charge level, with the percentage beside it and a
+// lightning bolt in front of it while the car is charging.
 static void draw_gauge(GContext *ctx, int16_t centre_x, int16_t y, bool big) {
-  char percent[8];
+  char percent[12];
   snprintf(percent, sizeof(percent), "%d%%", s_battery);
   GFont font = fonts_get_system_font(big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD);
   int16_t w = big ? 34 : 26;
   int16_t h = big ? 16 : 12;
   int16_t gap = big ? 8 : 6;
+  int16_t bolt_w = s_charging ? (big ? 13 : 10) : 0;  // the bolt and the space after it
   int16_t label_w = text_width(percent, font);
-  int16_t x = centre_x - (w + 2 + gap + label_w) / 2;
+  int16_t x = centre_x - (bolt_w + w + 2 + gap + label_w) / 2;
+
+  if (s_charging) {
+    draw_bolt(ctx, x, y, big);
+    x += bolt_w;
+  }
 
   graphics_context_set_stroke_color(ctx, GColorWhite);
   graphics_context_set_stroke_width(ctx, 1);
@@ -460,9 +508,11 @@ static void draw_message(GContext *ctx, GRect area, bool big) {
   GFont font = large;
   GColor color = GColorWhite;
   if (s_phase == PHASE_IDLE) {
-    text = "Hold a button";
+    // Nothing is running: say how charging is going, if it is.
+    bool charge = s_charge_text[0] != '\0';
+    text = charge ? s_charge_text : "Hold a button";
     font = small;
-    color = ON_COLOR(GColorLightGray, GColorWhite);
+    color = charge ? GColorWhite : ON_COLOR(GColorLightGray, GColorWhite);
   } else if (s_phase == PHASE_OK) {
     color = ON_COLOR(GColorGreen, GColorWhite);
   } else if (s_phase == PHASE_ERROR) {
@@ -568,7 +618,7 @@ static void init(void) {
 
   app_message_register_inbox_received(inbox_received);
   app_message_register_outbox_failed(outbox_failed);
-  app_message_open(128, 64);
+  app_message_open(192, 64);
 
   s_appeared_at_ms = now_ms();
   window_stack_push(s_window, true);

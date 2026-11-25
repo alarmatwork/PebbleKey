@@ -32,6 +32,7 @@ const DEFAULT_SCOPES = [
   'conve:lock_status',
   'conve:fuel_status',
   'conve:battery_charge_level',
+  'energy:state:read',
   'location:read'
 ].join(' ');
 
