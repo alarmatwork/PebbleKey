@@ -1,7 +1,7 @@
 {
   "name": "pebblekey",
   "author": "alarmatwork",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "keywords": [
     "pebble-app"
@@ -52,7 +52,9 @@
       "Info",
       "LockState",
       "Battery",
-      "Climate"
+      "Climate",
+      "Charging",
+      "ChargeInfo"
     ],
     "resources": {
       "media": []

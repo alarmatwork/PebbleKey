@@ -18,7 +18,7 @@ does not appear in search, and you can switch it to Listed later.
 
 | Field | Value |
 | --- | --- |
-| File | `dist/PebbleKey.pbw` (version 1.0.0) |
+| File | `dist/PebbleKey.pbw` (version 1.1.0) |
 | App name | PebbleKey for Volvo |
 | Category | Remotes |
 | Description | the text in [description.txt](description.txt) |
@@ -27,12 +27,12 @@ does not appear in search, and you can switch it to Listed later.
 | Banner (720×320, optional) | [banner.png](banner.png), the same file for every platform |
 | Website URL | https://github.com/alarmatwork/PebbleKey |
 | Source code URL | https://github.com/alarmatwork/PebbleKey |
-| Release notes | First release. |
+| Release notes | see [Release notes](#release-notes) below |
 | Visibility | Unlisted to start with, Listed once tested |
 
 ## Screenshots
 
-Four per watch model, in [screenshots/](screenshots/), taken from `dist/PebbleKey.pbw` in the
+Five per watch model, in [screenshots/](screenshots/), taken from `dist/PebbleKey.pbw` in the
 emulator with sample car data. Each file name starts with the platform it belongs to.
 
 | Platform | Watch | Size |
@@ -45,8 +45,20 @@ emulator with sample car data. Each file name starts with the platform it belong
 | flint | Pebble 2 Duo | 144×168 |
 | gabbro | Pebble Round 2 | 260×260 |
 
-The four screens, in the order to upload them: `1_locked`, `2_unlocked`, `3_climate`,
-`4_far_away`.
+The five screens, in the order to upload them: `1_locked`, `2_unlocked`, `3_climate`,
+`4_far_away`, `5_charging`.
+
+## Release notes
+
+**1.1.0**
+
+> Shows charging: a lightning bolt next to the battery level, the charge target and the time
+> left. To switch it on, tap Sign in with Volvo in the settings once more.
+> When your Volvo login has run out, the watch now says so as soon as you open the app.
+
+**1.0.0**
+
+> First release.
 
 ## Submitting
 
@@ -63,6 +75,9 @@ Unlisted, while `pebble publish` lists a new app publicly at once.
 There is no review queue: the app is live at `https://apps.repebble.com/<id>` straight away.
 
 ## Releasing an update later
+
+If the update asks Volvo for a new permission, deploy the sign-in service first
+(`cd broker && npx wrangler deploy`), so that people who sign in again get it.
 
 1. Raise `version` in `package.json`. The store refuses a version it has seen before.
 2. Run `tools/make_dist.sh` to rebuild `dist/PebbleKey.pbw`.

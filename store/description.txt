@@ -5,7 +5,7 @@ Hold a button on your Pebble:
 - SELECT (middle): start or stop the climate, to pre-heat or cool the cabin
 - DOWN: lock
 
-The screen shows whether the car is locked, its battery level, and whether a door, the boot or the hood is open.
+The screen shows whether the car is locked, its battery level, and whether a door, the boot or the hood is open. While the car charges, it also shows the charge target and the time left.
 
 Made to be hard to trigger by accident:
 - Every action needs a hold of about a second, so a bump cannot unlock your car.

@@ -93,7 +93,7 @@ test('/start sends the user to Volvo with PKCE and this service as the redirect'
   assert.strictEqual(target.searchParams.get('code_challenge_method'), 'S256');
   assert.match(target.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/);
   const scopes = target.searchParams.get('scope').split(' ');
-  for (const scope of ['openid', 'conve:vehicle_relation', 'conve:lock', 'conve:unlock', 'location:read']) {
+  for (const scope of ['openid', 'conve:vehicle_relation', 'conve:lock', 'conve:unlock', 'energy:state:read', 'location:read']) {
     assert.ok(scopes.includes(scope), scope);
   }
   // The verifier travels inside the state, and must not be readable there.
