@@ -20,6 +20,15 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return 2 * EARTH_RADIUS_M * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Compass direction from the first point to the second, e.g. 'NE'.
+function direction(lat1, lon1, lat2, lon2) {
+  var y = Math.sin(toRadians(lon2 - lon1)) * Math.cos(toRadians(lat2));
+  var x = Math.cos(toRadians(lat1)) * Math.sin(toRadians(lat2)) -
+    Math.sin(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.cos(toRadians(lon2 - lon1));
+  var degrees = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(degrees / 45) % 8];
+}
+
 function formatDistance(meters) {
   if (meters < 1000) {
     return Math.round(meters / 10) * 10 + ' m';
@@ -85,10 +94,11 @@ module.exports = function createProximity(deps) {
   }
 
   /**
-   * @param {number} limitMeters - how far from the car still counts as "at the car"
-   * @param {function(Object)} cb - cb({near: true}) or cb({near: false, text: why})
+   * Where the car is, seen from the phone.
+   * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, {meters,
+   *   accuracy: of the phone's fix in metres, direction: e.g. 'NE'})
    */
-  function check(limitMeters, cb) {
+  function locate(cb) {
     var car;
     var phone;
     var failure = null;
@@ -100,25 +110,43 @@ module.exports = function createProximity(deps) {
         return;
       }
       if (failure) {
-        cb({ near: false, text: failure });
+        cb(failure);
         return;
       }
-      var meters = distanceMeters(phone.lat, phone.lon, car.lat, car.lon);
-      // Give an imprecise phone fix the benefit of the doubt, but never more than the limit
-      // itself, so a very rough fix cannot make a far-away car count as near.
-      var slack = Math.min(phone.accuracy, limitMeters);
-      if (meters - slack <= limitMeters) {
-        cb({ near: true, meters: meters });
-      } else {
-        cb({ near: false, meters: meters, text: 'Car is ' + formatDistance(meters) + ' away' });
-      }
+      cb(null, {
+        meters: distanceMeters(phone.lat, phone.lon, car.lat, car.lon),
+        accuracy: phone.accuracy,
+        direction: direction(phone.lat, phone.lon, car.lat, car.lon)
+      });
     }
     carLocation(function(err, point) { car = point; done(err); });
     phoneLocation(function(err, point) { phone = point; done(err); });
   }
 
+  /**
+   * @param {number} limitMeters - how far from the car still counts as "at the car"
+   * @param {function(Object)} cb - cb({near: true}) or cb({near: false, text: why})
+   */
+  function check(limitMeters, cb) {
+    locate(function(err, where) {
+      if (err) {
+        cb({ near: false, text: err });
+        return;
+      }
+      // Give an imprecise phone fix the benefit of the doubt, but never more than the limit
+      // itself, so a very rough fix cannot make a far-away car count as near.
+      var slack = Math.min(where.accuracy, limitMeters);
+      if (where.meters - slack <= limitMeters) {
+        cb({ near: true, meters: where.meters });
+      } else {
+        cb({ near: false, meters: where.meters, text: 'Car is ' + formatDistance(where.meters) + ' away' });
+      }
+    });
+  }
+
   return {
     check: check,
+    locate: locate,
     // Warm both lookups so a later check answers quickly.
     prefetch: function() {
       carLocation(function() {});
@@ -129,3 +157,4 @@ module.exports = function createProximity(deps) {
 
 module.exports.distanceMeters = distanceMeters;
 module.exports.formatDistance = formatDistance;
+module.exports.direction = direction;

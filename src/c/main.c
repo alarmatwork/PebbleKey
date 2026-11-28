@@ -5,6 +5,8 @@
 #define CMD_LOCK 2
 #define CMD_CLIMATE 4  // phone starts or stops climate, whichever applies
 #define CMD_UNLOCK_ANYWAY 5  // unlock without the distance check, after the user confirmed
+#define CMD_TOGGLE 6  // phone asks the car, then locks or unlocks, whichever undoes its state
+#define CMD_EXTRA 7  // one of the DOWN menu's items, named by the Item key
 
 // Status values received from the phone.
 #define STATUS_PROGRESS 0
@@ -14,7 +16,8 @@
 #define STATUS_NOTICE 4  // something the user should know although no command is running
 
 #define HOLD_MS 700
-#define REPLY_TIMEOUT_MS 75000
+// Long enough for the phone to wait out a slow car (110 s) and then check on it.
+#define REPLY_TIMEOUT_MS 150000
 // How long a "hold UP again" confirmation stays open.
 #define CONFIRM_MS 15000
 // A hold only counts if the button went down this long after the app appeared. A button still
@@ -31,9 +34,14 @@
 #define LOCK_LOCKED 1
 #define LOCK_UNLOCKED 2
 
+// The DOWN menu, as the phone sends it: "id:title" lines.
+#define MENU_MAX_ITEMS 8
+#define MENU_PERSIST_KEY 1
+#define DETAILS_MAX 320
+
 typedef enum { PHASE_IDLE, PHASE_BUSY, PHASE_OK, PHASE_ERROR } Phase;
 // The three actions, in button order from top to bottom.
-typedef enum { ACTION_NONE = -1, ACTION_UNLOCK, ACTION_CLIMATE, ACTION_LOCK } Action;
+typedef enum { ACTION_NONE = -1, ACTION_TOGGLE, ACTION_CLIMATE, ACTION_MORE } Action;
 
 static Window *s_window;
 static Layer *s_canvas;
@@ -63,6 +71,27 @@ static AppTimer *s_timeout_timer;
 static AppTimer *s_confirm_timer;
 static AppTimer *s_spin_timer;
 static AppTimer *s_idle_timer;
+// Which menu item CMD_EXTRA runs.
+static char s_extra_id[16];
+
+// The DOWN menu as the phone sent it, and a copy of it cut up in place into ids and titles.
+static char s_menu_raw[160];
+static char s_menu_text[160];
+static char *s_menu_ids[MENU_MAX_ITEMS];
+static char *s_menu_titles[MENU_MAX_ITEMS];
+static int s_menu_count;
+static Window *s_menu_window;
+static MenuLayer *s_menu_layer;
+
+// The details screen, e.g. for Car info.
+static Window *s_details_window;
+static ScrollLayer *s_details_scroll;
+static TextLayer *s_details_title_layer;
+static TextLayer *s_details_layer;
+static char s_details_title[48];
+static char s_details[DETAILS_MAX];
+
+#define ON_COLOR(color, mono) PBL_IF_COLOR_ELSE(color, mono)
 
 static void redraw(void) {
   // May run before the window has loaded; the first draw picks the state up then.
@@ -158,6 +187,9 @@ static void send_command(int cmd) {
     return;
   }
   dict_write_int32(iter, MESSAGE_KEY_Command, cmd);
+  if (cmd == CMD_EXTRA) {
+    dict_write_cstring(iter, MESSAGE_KEY_Item, s_extra_id);
+  }
   if (app_message_outbox_send() != APP_MSG_OK) {
     finish(false, "Phone not reachable");
   }
@@ -169,10 +201,12 @@ static void request(int cmd) {
   }
   set_confirming(false);
   s_busy = true;
-  s_running = cmd == CMD_LOCK ? ACTION_LOCK : cmd == CMD_CLIMATE ? ACTION_CLIMATE : ACTION_UNLOCK;
+  s_running = cmd == CMD_CLIMATE ? ACTION_CLIMATE : cmd == CMD_EXTRA ? ACTION_MORE : ACTION_TOGGLE;
   vibes_short_pulse();
-  set_phase(PHASE_BUSY,
-            cmd == CMD_LOCK ? "Locking..." : cmd == CMD_CLIMATE ? "Climate..." : "Unlocking...");
+  set_phase(PHASE_BUSY, cmd == CMD_LOCK ? "Locking..."
+                        : cmd == CMD_UNLOCK || cmd == CMD_UNLOCK_ANYWAY ? "Unlocking..."
+                        : cmd == CMD_CLIMATE ? "Climate..."
+                        : cmd == CMD_TOGGLE ? "Checking lock..." : "Asking car...");
   cancel_timer(&s_timeout_timer);
   s_timeout_timer = app_timer_register(REPLY_TIMEOUT_MS, timeout_timer_cb, NULL);
   if (s_js_ready) {
@@ -181,6 +215,163 @@ static void request(int cmd) {
     // The phone-side JS is still starting; send as soon as it reports ready.
     s_pending_cmd = cmd;
   }
+}
+
+// ---- The DOWN menu ----
+
+// Cut "id:title\nid:title" into the item arrays.
+static void parse_menu(void) {
+  strncpy(s_menu_text, s_menu_raw, sizeof(s_menu_text));
+  s_menu_count = 0;
+  char *line = s_menu_text;
+  while (line && *line && s_menu_count < MENU_MAX_ITEMS) {
+    char *next = strchr(line, '\n');
+    if (next) {
+      *next++ = '\0';
+    }
+    char *colon = strchr(line, ':');
+    if (colon) {
+      *colon = '\0';
+      s_menu_ids[s_menu_count] = line;
+      s_menu_titles[s_menu_count] = colon + 1;
+      s_menu_count++;
+    }
+    line = next;
+  }
+}
+
+static void set_menu(const char *text) {
+  strncpy(s_menu_raw, text, sizeof(s_menu_raw) - 1);
+  s_menu_raw[sizeof(s_menu_raw) - 1] = '\0';
+  persist_write_string(MENU_PERSIST_KEY, s_menu_raw);
+  parse_menu();
+  if (s_menu_layer) {
+    menu_layer_reload_data(s_menu_layer);
+  }
+}
+
+static uint16_t menu_get_num_rows(MenuLayer *layer, uint16_t section, void *context) {
+  return s_menu_count;
+}
+
+static void menu_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, void *context) {
+  menu_cell_basic_draw(ctx, cell, s_menu_titles[index->row], NULL, NULL);
+}
+
+static void request(int cmd);
+
+static void menu_select(MenuLayer *layer, MenuIndex *index, void *context) {
+  if (index->row >= s_menu_count) {
+    return;
+  }
+  strncpy(s_extra_id, s_menu_ids[index->row], sizeof(s_extra_id) - 1);
+  s_extra_id[sizeof(s_extra_id) - 1] = '\0';
+  window_stack_remove(s_menu_window, true);
+  request(CMD_EXTRA);
+}
+
+static void menu_window_load(Window *window) {
+  Layer *root = window_get_root_layer(window);
+  s_menu_layer = menu_layer_create(layer_get_bounds(root));
+  menu_layer_set_callbacks(s_menu_layer, NULL, (MenuLayerCallbacks) {
+    .get_num_rows = menu_get_num_rows,
+    .draw_row = menu_draw_row,
+    .select_click = menu_select,
+  });
+  menu_layer_set_normal_colors(s_menu_layer, GColorBlack, GColorWhite);
+  menu_layer_set_highlight_colors(s_menu_layer, ON_COLOR(GColorOrange, GColorWhite), GColorBlack);
+  menu_layer_set_click_config_onto_window(s_menu_layer, window);
+  layer_add_child(root, menu_layer_get_layer(s_menu_layer));
+}
+
+static void menu_window_unload(Window *window) {
+  menu_layer_destroy(s_menu_layer);
+  s_menu_layer = NULL;
+}
+
+static void open_menu(void) {
+  if (!s_menu_window) {
+    s_menu_window = window_create();
+    window_set_background_color(s_menu_window, GColorBlack);
+    window_set_window_handlers(s_menu_window, (WindowHandlers) {
+      .load = menu_window_load,
+      .unload = menu_window_unload,
+    });
+  }
+  window_stack_push(s_menu_window, true);
+}
+
+// ---- The details screen ----
+
+static void details_window_load(Window *window) {
+  Layer *root = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(root);
+  bool big = bounds.size.h >= 200;
+  int16_t inset = PBL_IF_ROUND_ELSE(bounds.size.w / 8, 4);
+  int16_t width = bounds.size.w - 2 * inset;
+  GFont title_font = fonts_get_system_font(big ? FONT_KEY_GOTHIC_28_BOLD : FONT_KEY_GOTHIC_24_BOLD);
+  GFont font = fonts_get_system_font(big ? FONT_KEY_GOTHIC_24 : FONT_KEY_GOTHIC_18);
+  int16_t top = PBL_IF_ROUND_ELSE(bounds.size.h / 8, 0);
+
+  s_details_scroll = scroll_layer_create(bounds);
+  scroll_layer_set_click_config_onto_window(s_details_scroll, window);
+  scroll_layer_set_shadow_hidden(s_details_scroll, true);
+
+  GSize title_size = graphics_text_layout_get_content_size(
+      s_details_title, title_font, GRect(0, 0, width, 200), GTextOverflowModeWordWrap,
+      GTextAlignmentCenter);
+  s_details_title_layer = text_layer_create(GRect(inset, top, width, title_size.h + 6));
+  text_layer_set_text(s_details_title_layer, s_details_title);
+  text_layer_set_font(s_details_title_layer, title_font);
+  text_layer_set_text_alignment(s_details_title_layer, GTextAlignmentCenter);
+  text_layer_set_background_color(s_details_title_layer, GColorClear);
+  text_layer_set_text_color(s_details_title_layer, GColorWhite);
+
+  int16_t body_y = top + title_size.h + 8;
+  GSize body_size = graphics_text_layout_get_content_size(
+      s_details, font, GRect(0, 0, width, 2000), GTextOverflowModeWordWrap,
+      PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentLeft));
+  s_details_layer = text_layer_create(GRect(inset, body_y, width, body_size.h + 8));
+  text_layer_set_text(s_details_layer, s_details);
+  text_layer_set_font(s_details_layer, font);
+  text_layer_set_text_alignment(s_details_layer, PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentLeft));
+  text_layer_set_background_color(s_details_layer, GColorClear);
+  text_layer_set_text_color(s_details_layer, GColorWhite);
+
+  scroll_layer_add_child(s_details_scroll, text_layer_get_layer(s_details_title_layer));
+  scroll_layer_add_child(s_details_scroll, text_layer_get_layer(s_details_layer));
+  scroll_layer_set_content_size(s_details_scroll,
+      GSize(bounds.size.w, body_y + body_size.h + 8 + PBL_IF_ROUND_ELSE(bounds.size.h / 6, 4)));
+  layer_add_child(root, scroll_layer_get_layer(s_details_scroll));
+}
+
+static void details_window_unload(Window *window) {
+  text_layer_destroy(s_details_layer);
+  text_layer_destroy(s_details_title_layer);
+  scroll_layer_destroy(s_details_scroll);
+  s_details_layer = NULL;
+  s_details_title_layer = NULL;
+  s_details_scroll = NULL;
+}
+
+static void show_details(const char *title, const char *text) {
+  strncpy(s_details_title, title, sizeof(s_details_title) - 1);
+  s_details_title[sizeof(s_details_title) - 1] = '\0';
+  strncpy(s_details, text, sizeof(s_details) - 1);
+  s_details[sizeof(s_details) - 1] = '\0';
+  if (!s_details_window) {
+    s_details_window = window_create();
+    window_set_background_color(s_details_window, GColorBlack);
+    window_set_window_handlers(s_details_window, (WindowHandlers) {
+      .load = details_window_load,
+      .unload = details_window_unload,
+    });
+  }
+  // Showing new details: rebuild the layers for the new text.
+  if (window_stack_contains_window(s_details_window)) {
+    window_stack_remove(s_details_window, false);
+  }
+  window_stack_push(s_details_window, true);
 }
 
 static void inbox_received(DictionaryIterator *iter, void *context) {
@@ -219,6 +410,10 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
     strncpy(s_charge_text, charge->value->cstring, sizeof(s_charge_text) - 1);
     s_charge_text[sizeof(s_charge_text) - 1] = '\0';
   }
+  Tuple *menu = dict_find(iter, MESSAGE_KEY_Menu);
+  if (menu && menu->length > 1 && strcmp(menu->value->cstring, s_menu_raw) != 0) {
+    set_menu(menu->value->cstring);
+  }
   redraw();
 
   Tuple *status = dict_find(iter, MESSAGE_KEY_Status);
@@ -234,9 +429,14 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
         set_phase(PHASE_BUSY, text);
       }
       break;
-    case STATUS_OK:
+    case STATUS_OK: {
       finish(true, text);
+      Tuple *details = dict_find(iter, MESSAGE_KEY_Details);
+      if (details && details->length > 1) {
+        show_details(text, details->value->cstring);
+      }
       break;
+    }
     case STATUS_CONFIRM:
       ask_confirmation(text);
       break;
@@ -266,9 +466,11 @@ static bool is_fresh_press(void) {
   return now_ms() - s_appeared_at_ms >= HOLD_MS + FRESH_PRESS_MS;
 }
 
+// UP locks an unlocked car and unlocks a locked one. After the phone held an unlock back
+// because the car is far away, the next hold confirms that unlock.
 static void up_long_click(ClickRecognizerRef recognizer, void *context) {
   if (is_fresh_press()) {
-    request(s_confirming ? CMD_UNLOCK_ANYWAY : CMD_UNLOCK);
+    request(s_confirming ? CMD_UNLOCK_ANYWAY : CMD_TOGGLE);
   }
 }
 
@@ -279,8 +481,8 @@ static void select_long_click(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void down_long_click(ClickRecognizerRef recognizer, void *context) {
-  if (is_fresh_press()) {
-    request(CMD_LOCK);
+  if (is_fresh_press() && !s_busy) {
+    open_menu();
   }
 }
 
@@ -291,8 +493,6 @@ static void click_config_provider(void *context) {
 }
 
 // ---- Drawing. Everything is drawn from shapes, so it scales to every watch model. ----
-
-#define ON_COLOR(color, mono) PBL_IF_COLOR_ELSE(color, mono)
 
 static GRect circle_rect(GPoint centre, int16_t radius) {
   return GRect(centre.x - radius, centre.y - radius, 2 * radius + 1, 2 * radius + 1);
@@ -362,6 +562,16 @@ static void draw_thermometer(GContext *ctx, GPoint centre, int16_t height, GColo
   }
 }
 
+// Three dots: the DOWN button opens a menu of more.
+static void draw_dots(GContext *ctx, GPoint centre, int16_t radius, GColor color) {
+  int16_t r = radius >= 17 ? 3 : 2;
+  int16_t gap = radius * 4 / 10;
+  graphics_context_set_fill_color(ctx, color);
+  for (int16_t i = -1; i <= 1; i++) {
+    graphics_fill_circle(ctx, GPoint(centre.x + i * gap, centre.y), r);
+  }
+}
+
 // Where the icon for a button sits: next to the physical button it belongs to.
 static GPoint action_centre(GRect bounds, Action action, int16_t radius) {
   int16_t step = (int16_t)action - 1;  // -1, 0, 1 from top to bottom
@@ -379,7 +589,7 @@ static void draw_action(GContext *ctx, GRect bounds, Action action, int16_t radi
   GPoint centre = action_centre(bounds, action, radius);
   bool running = s_running == action;
   // Lit while it needs attention: unlock waiting for the second hold, or climate being on.
-  bool lit = (action == ACTION_UNLOCK && s_confirming) || (action == ACTION_CLIMATE && s_climate_on);
+  bool lit = (action == ACTION_TOGGLE && s_confirming) || (action == ACTION_CLIMATE && s_climate_on);
   bool filled = PBL_IF_COLOR_ELSE(true, running || lit);
   GColor fill = running ? GColorWhite : lit ? ON_COLOR(GColorOrange, GColorWhite)
                                             : ON_COLOR(GColorDarkGray, GColorBlack);
@@ -395,8 +605,12 @@ static void draw_action(GContext *ctx, GRect bounds, Action action, int16_t radi
   }
   if (action == ACTION_CLIMATE) {
     draw_thermometer(ctx, centre, radius * 13 / 10, ink, fill);
+  } else if (action == ACTION_MORE) {
+    draw_dots(ctx, centre, radius, ink);
   } else {
-    draw_padlock(ctx, centre, radius * 9 / 10, action == ACTION_UNLOCK, ink, fill);
+    // What a hold does: an open padlock unlocks a locked car, a shut one locks.
+    draw_padlock(ctx, centre, radius * 9 / 10, s_lock_state == LOCK_LOCKED || s_confirming, ink,
+                 fill);
   }
 }
 
@@ -551,9 +765,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   int16_t action_r = huge ? 19 : big ? 17 : 13;
   int16_t badge_r = huge ? 40 : big ? 32 : 22;
 
-  draw_action(ctx, bounds, ACTION_UNLOCK, action_r);
+  draw_action(ctx, bounds, ACTION_TOGGLE, action_r);
   draw_action(ctx, bounds, ACTION_CLIMATE, action_r);
-  draw_action(ctx, bounds, ACTION_LOCK, action_r);
+  draw_action(ctx, bounds, ACTION_MORE, action_r);
 
   // Everything else goes in a column to the left of the button icons.
   int16_t left = PBL_IF_ROUND_ELSE(w / 8, 2);
@@ -586,7 +800,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   // On a round screen the lowest button icon reaches into the column, so the message gets a
   // narrower strip that stays clear of it.
   int16_t half = PBL_IF_ROUND_ELSE(
-      action_centre(bounds, ACTION_LOCK, action_r).x - action_r - 4 - centre_x, col_w / 2);
+      action_centre(bounds, ACTION_MORE, action_r).x - action_r - 4 - centre_x, col_w / 2);
   draw_message(ctx, GRect(centre_x - half, y, 2 * half, bottom - y), big);
 }
 
@@ -618,7 +832,14 @@ static void init(void) {
 
   app_message_register_inbox_received(inbox_received);
   app_message_register_outbox_failed(outbox_failed);
-  app_message_open(192, 64);
+  // Car info and the menu come in longer messages than the car's state alone.
+  app_message_open(512, 64);
+
+  // The menu as the phone last sent it, so DOWN works before the phone has answered.
+  if (persist_read_string(MENU_PERSIST_KEY, s_menu_raw, sizeof(s_menu_raw)) <= 0) {
+    strncpy(s_menu_raw, "info:Car info", sizeof(s_menu_raw) - 1);
+  }
+  parse_menu();
 
   s_appeared_at_ms = now_ms();
   window_stack_push(s_window, true);
@@ -629,6 +850,12 @@ static void deinit(void) {
   cancel_timer(&s_confirm_timer);
   cancel_timer(&s_spin_timer);
   cancel_timer(&s_idle_timer);
+  if (s_menu_window) {
+    window_destroy(s_menu_window);
+  }
+  if (s_details_window) {
+    window_destroy(s_details_window);
+  }
   window_destroy(s_window);
 }
 

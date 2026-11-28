@@ -4,13 +4,23 @@ var customClay = require('./custom-clay');
 var brokerConfig = require('./broker.json');
 var createVolvo = require('./volvo');
 var createProximity = require('./proximity');
+var createLockState = require('./lockstate');
+var createExtras = require('./extras');
 
 // Keep in sync with src/c/main.c.
 var CMD_UNLOCK = 1;
 var CMD_LOCK = 2;
 var CMD_CLIMATE = 4;
 var CMD_UNLOCK_ANYWAY = 5;
-var STATUS_REFRESH_DELAY_MS = 8000;
+var CMD_TOGGLE = 6;
+var CMD_EXTRA = 7;
+// After a lock or unlock, read the car's state back this long after it, until the car has
+// reported its new state.
+var FOLLOW_UP_MS = [5000, 15000, 30000, 60000, 120000];
+// When Volvo could not say whether a lock or unlock went through, look at the car this often.
+var VERIFY_MS = [3000, 6000, 10000, 15000];
+// After this long without an answer the watch says the car is being slow, not stuck.
+var SLOW_NOTE_MS = 15000;
 var STATUS_PROGRESS = 0;
 var STATUS_OK = 1;
 var STATUS_ERROR = 2;
@@ -35,6 +45,8 @@ var proximity = createProximity({
   volvo: volvo,
   geolocation: typeof navigator !== 'undefined' ? navigator.geolocation : null
 });
+var lockState = createLockState();
+var extras = createExtras({ volvo: volvo, proximity: proximity, lockState: lockState });
 
 // Lock states as the watch draws them (see watchStatus in volvo.js).
 var LOCK_LOCKED = 1;
@@ -51,9 +63,16 @@ function tellWatch(status, message, extra) {
     function() { console.log('Could not reach the watch: ' + message); });
 }
 
-// Ask Volvo what the car last reported and show it on the watch.
-function refreshStatus() {
+function lockValue(locked) {
+  return locked === true ? LOCK_LOCKED : locked === false ? LOCK_UNLOCKED : 0;
+}
+
+// Ask Volvo what the car last reported and show it on the watch. `cb(settled)`, if given,
+// learns whether the car has reported its lock state since the last lock or unlock.
+function refreshStatus(cb) {
+  cb = cb || function() {};
   if (!volvo.isConfigured()) {
+    cb(true);
     return;
   }
   volvo.getStatus(function(err, status) {
@@ -63,8 +82,11 @@ function refreshStatus() {
         // Say so right away, rather than only once the user holds a button.
         tellWatch(STATUS_NOTICE, err);
       }
+      cb(false);
       return;
     }
+    var lock = lockState.effective(status.locked, status.lockedAt);
+    status.locked = lock.locked;
     var state = createVolvo.watchStatus(status);
     Pebble.sendAppMessage({
       LockState: state.lock,
@@ -72,9 +94,40 @@ function refreshStatus() {
       Info: state.open,
       Climate: volvo.climateIsOn() ? 1 : 0,
       Charging: state.charging,
-      ChargeInfo: state.charge
+      ChargeInfo: state.charge,
+      // The login's scopes become known with its first refresh.
+      Menu: extras.menu()
     });
+    cb(lock.settled);
   });
+}
+
+// Keep reading the car's state back until it has reported the result of the last command.
+var followUpTimer = null;
+function followUp() {
+  clearTimeout(followUpTimer);
+  var step = 0;
+  var started = Date.now();
+  function next() {
+    if (step >= FOLLOW_UP_MS.length) {
+      return;
+    }
+    followUpTimer = setTimeout(function() {
+      step += 1;
+      refreshStatus(function(settled) {
+        if (!settled) {
+          next();
+        }
+      });
+    }, FOLLOW_UP_MS[step] - (Date.now() - started));
+  }
+  next();
+}
+
+// Tell the watch after a while that the car is still being waited for. Returns the cancel.
+function slowNote(text) {
+  var timer = setTimeout(function() { tellWatch(STATUS_PROGRESS, text); }, SLOW_NOTE_MS);
+  return function() { clearTimeout(timer); };
 }
 
 // How far from the car (in metres) an unlock goes through without asking; 0 switches the
@@ -111,14 +164,47 @@ function runUnlock(anyway) {
 
 function runClimate() {
   tellWatch(STATUS_PROGRESS, volvo.climateIsOn() ? 'Stopping climate...' : 'Starting climate...');
-  volvo.toggleClimate(function(err, isOn) {
+  var stopNote = slowNote('Waiting for the car...');
+  volvo.toggleClimate(function(err, isOn, unconfirmed) {
+    stopNote();
     if (err) {
       console.log('climate failed: ' + err);
       tellWatch(STATUS_ERROR, err);
-    } else {
-      tellWatch(STATUS_OK, isOn ? 'Climate on' : 'Climate off', { Climate: isOn ? 1 : 0 });
+      return;
     }
+    // Volvo gave up waiting for the car's answer, but the car nearly always does it anyway.
+    var text = (isOn ? 'Climate on' : 'Climate off') + (unconfirmed ? ', car slow to confirm' : '');
+    tellWatch(STATUS_OK, text, { Climate: isOn ? 1 : 0 });
   });
+}
+
+function lockDone(locked, sentAt) {
+  lockState.commandDone(locked, sentAt);
+  tellWatch(STATUS_OK, locked ? 'Locked' : 'Unlocked', { LockState: lockValue(locked) });
+  followUp();
+}
+
+// Volvo could not say whether the command went through: look at the car to find out.
+function verifyLock(locked, sentAt, err) {
+  tellWatch(STATUS_PROGRESS, 'Checking the car...');
+  var step = 0;
+  function check() {
+    setTimeout(function() {
+      volvo.getLock(function(readErr, lock) {
+        // Only a report made since the command tells anything.
+        var isNew = !readErr && (lock.lockedAt === null || lock.lockedAt >= sentAt);
+        if (isNew && lock.locked === locked) {
+          lockDone(locked, sentAt);
+        } else if (++step < VERIFY_MS.length) {
+          check();
+        } else {
+          tellWatch(STATUS_ERROR, err);
+          refreshStatus();
+        }
+      });
+    }, VERIFY_MS[step]);
+  }
+  check();
 }
 
 function run(command) {
@@ -126,27 +212,71 @@ function run(command) {
     runClimate();
     return;
   }
-  tellWatch(STATUS_PROGRESS, command === 'lock' ? 'Locking...' : 'Unlocking...');
+  var locked = command === 'lock';
+  var sentAt = Date.now();
+  tellWatch(STATUS_PROGRESS, locked ? 'Locking...' : 'Unlocking...');
+  var stopNote = slowNote('Waiting for the car...');
   volvo.sendCommand(command, function(err, data) {
+    stopNote();
     if (err) {
       console.log(command + ' failed: ' + err);
+      if (createVolvo.isUncertain(err)) {
+        verifyLock(locked, sentAt, err);
+      } else {
+        tellWatch(STATUS_ERROR, err);
+      }
+      return;
+    }
+    if (!locked && data.readyToUnlock && data.readyToUnlockUntil) {
+      // The car unlocks only once a handle is touched, so its lock state stays as it was.
+      tellWatch(STATUS_OK, 'Unlocked for ' + data.readyToUnlockUntil + ' s');
+      followUp();
+      return;
+    }
+    lockDone(locked, sentAt);
+  });
+}
+
+// UP: lock an unlocked car, unlock a locked one. The car is asked first, so that the watch's
+// picture of it, which may be old, does not decide.
+function runToggle() {
+  tellWatch(STATUS_PROGRESS, 'Checking lock...');
+  volvo.getLock(function(err, lock) {
+    if (err && (createVolvo.isLoginExpired(err) || !volvo.isConfigured())) {
       tellWatch(STATUS_ERROR, err);
       return;
     }
-    if (command === 'lock') {
-      tellWatch(STATUS_OK, 'Locked', { LockState: LOCK_LOCKED });
-    } else if (data.readyToUnlock && data.readyToUnlockUntil) {
-      tellWatch(STATUS_OK, 'Unlocked for ' + data.readyToUnlockUntil + ' s');
-    } else {
-      tellWatch(STATUS_OK, 'Unlocked', { LockState: LOCK_UNLOCKED });
+    var locked = err ? lockState.effective(null, null).locked
+                     : lockState.effective(lock.locked, lock.lockedAt).locked;
+    if (locked === null) {
+      // Lock state unknown (no lock status scope, or Volvo did not answer): undo whatever the
+      // last command did, and lock when there was none, as that is the safe way round.
+      console.log('Lock state unknown' + (err ? ': ' + err : ''));
+      locked = lockState.lastCommand() === true;
     }
-    // Give the car a moment to report its new state before reading it back.
-    setTimeout(refreshStatus, STATUS_REFRESH_DELAY_MS);
+    if (locked) {
+      runUnlock(false);
+    } else {
+      run('lock');
+    }
+  });
+}
+
+function runExtra(id) {
+  extras.run(String(id), function(text) {
+    tellWatch(STATUS_PROGRESS, text);
+  }, function(err, text, details) {
+    if (err) {
+      console.log(id + ' failed: ' + err);
+      tellWatch(STATUS_ERROR, err);
+    } else {
+      tellWatch(STATUS_OK, text, details ? { Details: details } : {});
+    }
   });
 }
 
 Pebble.addEventListener('ready', function() {
-  Pebble.sendAppMessage({ JSReady: 1 });
+  Pebble.sendAppMessage({ JSReady: 1, Menu: extras.menu() });
   // Also fetches an access token up front, so the first button hold is quicker.
   refreshStatus();
   if (volvo.isConfigured() && unlockRange()) {
@@ -164,6 +294,10 @@ Pebble.addEventListener('appmessage', function(e) {
     run('lock');
   } else if (command === CMD_CLIMATE) {
     run('climate');
+  } else if (command === CMD_TOGGLE) {
+    runToggle();
+  } else if (command === CMD_EXTRA) {
+    runExtra(e.payload.Item);
   }
 });
 

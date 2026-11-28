@@ -23,6 +23,9 @@ var TOKENS_KEY = 'ex30-tokens';
 var CLIMATE_KEY = 'ex30-climate';
 
 var HTTP_TIMEOUT_MS = 30000;
+// Volvo answers a car command only once the car has carried it out, or given up on it. A car
+// that has to wake up first can take well over a minute, climate in particular.
+var COMMAND_TIMEOUT_MS = 110000;
 // Refresh this long before the access token actually expires.
 var EXPIRY_MARGIN_MS = 30000;
 // The car ends a remote climate run by itself after this long. Volvo's API has no way to ask
@@ -67,6 +70,7 @@ function base64Decode(input) {
 
 var INVOKE_ERRORS = {
   TIMEOUT: 'Car did not answer',
+  UNKNOWN: 'Car did not confirm',
   CONNECTION_FAILURE: 'Car is offline',
   VEHICLE_IN_SLEEP: 'Car is asleep',
   UNABLE_TO_LOCK_DOOR_OPEN: 'A door is open',
@@ -78,6 +82,7 @@ var INVOKE_ERRORS = {
 };
 
 var NOT_ALLOWED = 'Not allowed (scopes?)';
+var VOLVO_NO_ANSWER = 'Volvo did not answer';
 // Volvo no longer accepts the login: after 3 months at the latest, the user has to sign in again.
 var LOGIN_EXPIRED_SIGN_IN = 'Login expired, sign in again';
 var LOGIN_EXPIRED_OWN_KEYS = 'Login expired, redo setup';
@@ -88,8 +93,13 @@ var HTTP_ERRORS = {
   404: 'Car not found (VIN?)',
   415: 'Bad content type',
   422: 'Not supported by car',
-  429: 'Too many requests'
+  429: 'Too many requests',
+  504: VOLVO_NO_ANSWER
 };
+
+// Failures after which a command may well have reached the car anyway: nobody heard back from
+// the car in time, so the outcome is not known.
+var UNCERTAIN_ERRORS = [VOLVO_NO_ANSWER, INVOKE_ERRORS.TIMEOUT, INVOKE_ERRORS.UNKNOWN];
 
 /**
  * @param {Object} deps
@@ -119,7 +129,7 @@ module.exports = function createVolvo(deps) {
     storage.setItem(key, JSON.stringify(value));
   }
 
-  function http(method, url, headers, body, cb) {
+  function http(method, url, headers, body, cb, timeout) {
     var xhr = new XHR();
     var done = false;
     function finish(status, text) {
@@ -135,7 +145,7 @@ module.exports = function createVolvo(deps) {
         xhr.setRequestHeader(name, headers[name]);
       }
     }
-    xhr.timeout = HTTP_TIMEOUT_MS;
+    xhr.timeout = timeout || HTTP_TIMEOUT_MS;
     xhr.onload = function() { finish(xhr.status, xhr.responseText); };
     // Status 0 means no HTTP answer; the text then says why. The Pebble phone app marks a
     // request it refused (internet permission not granted for this watchapp) with _notAllowed.
@@ -148,7 +158,7 @@ module.exports = function createVolvo(deps) {
     if (reason === 'blocked') {
       return 'Allow internet in Pebble app';
     }
-    return reason === 'timeout' ? 'Volvo did not answer' : 'No internet on phone';
+    return reason === 'timeout' ? VOLVO_NO_ANSWER : 'No internet on phone';
   }
 
   function parseJson(text) {
@@ -254,7 +264,10 @@ module.exports = function createVolvo(deps) {
         save(TOKENS_KEY, {
           refreshToken: json.refresh_token || tokens.refreshToken,
           accessToken: json.access_token,
-          expiresAt: now() + (json.expires_in || 60) * 1000
+          expiresAt: now() + (json.expires_in || 60) * 1000,
+          // What the login may do, e.g. "openid conve:lock ...". Older sign-in services do
+          // not pass it on, and then it stays unknown.
+          scope: typeof json.scope === 'string' ? json.scope : tokens.scope || null
         });
         settle(null, json.access_token);
       } else if (status === 0) {
@@ -300,8 +313,10 @@ module.exports = function createVolvo(deps) {
    * @param {string} service - CONNECTED_VEHICLE, LOCATION or ENERGY
    * @param {string} path - path below /vehicles/{vin}/
    * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, responseData)
+   * @param {Object} [opts] - timeout: ms to wait for the answer; retried: set on the retry
    */
-  function api(method, service, path, cb, isRetry) {
+  function api(method, service, path, cb, opts) {
+    opts = opts || {};
     getAccessToken(function(err, token) {
       if (err) {
         cb(err);
@@ -321,10 +336,10 @@ module.exports = function createVolvo(deps) {
       var url = API_HOST + service + '/vehicles/' + encodeURIComponent(creds.vin) + '/' + path;
       http(method, url, headers, body,
         function(status, text) {
-          if (status === 401 && !isRetry) {
+          if (status === 401 && !opts.retried) {
             // The cached token was rejected; get a fresh one and try once more.
             forgetAccessToken();
-            api(method, service, path, cb, true);
+            api(method, service, path, cb, { timeout: opts.timeout, retried: true });
           } else if (status === 0) {
             cb(noAnswerMessage(text));
           } else if (status < 200 || status >= 300) {
@@ -334,13 +349,41 @@ module.exports = function createVolvo(deps) {
             var json = parseJson(text);
             cb(null, json.data || json);
           }
-        });
+        }, opts.timeout);
     });
   }
 
   /**
-   * @param {string} command - 'lock', 'unlock', 'climatization-start' or 'climatization-stop'
-   * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, data)
+   * The scopes the login was granted, or null while that is not known.
+   * @returns {string[]|null}
+   */
+  function grantedScopes() {
+    var tokens = load(TOKENS_KEY);
+    return tokens && typeof tokens.scope === 'string' ? tokens.scope.split(/\s+/) : null;
+  }
+
+  /** Whether the login may use `scope`; true while the granted scopes are not known. */
+  function mayUse(scope) {
+    var scopes = grantedScopes();
+    return !scopes || scopes.indexOf(scope) !== -1;
+  }
+
+  /**
+   * Read any resource of the car.
+   * @param {string} service - 'connected-vehicle', 'energy' or 'location'
+   * @param {string} path - path below /vehicles/{vin}/, e.g. 'odometer'
+   * @param {function(string|null, Object=)} cb
+   */
+  function read(service, path, cb) {
+    var services = { 'connected-vehicle': CONNECTED_VEHICLE, energy: ENERGY, location: LOCATION };
+    api('GET', services[service], path, cb);
+  }
+
+  /**
+   * @param {string} command - 'lock', 'unlock', 'climatization-start', 'climatization-stop',
+   *   'flash', 'honk-flash', ...
+   * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, data); see
+   *   isUncertain() for errors after which the car may have carried the command out anyway
    */
   function sendCommand(command, cb) {
     api('POST', CONNECTED_VEHICLE, 'commands/' + command, function(err, data) {
@@ -356,11 +399,47 @@ module.exports = function createVolvo(deps) {
       } else {
         cb(INVOKE_ERRORS[invoke] || ('Failed: ' + (invoke || 'no status')));
       }
-    });
+    }, { timeout: COMMAND_TIMEOUT_MS });
   }
 
   function isOpen(entry) {
     return !!entry && (entry.value === 'OPEN' || entry.value === 'AJAR');
+  }
+
+  function timeOf(entry) {
+    var at = entry && entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+    return isNaN(at) ? null : at;
+  }
+
+  /**
+   * Lock state and what is open, as the car last reported them.
+   * @param {function(string|null, Object=)} cb - cb(errorText) or cb(null, {locked:
+   *   boolean|null, lockedAt: ms of that report or null, open: string[]})
+   */
+  function getLock(cb) {
+    api('GET', CONNECTED_VEHICLE, 'doors', function(err, data) {
+      if (err) {
+        cb(err);
+        return;
+      }
+      var lock = data.centralLock && data.centralLock.value;
+      var open = [];
+      if (isOpen(data.frontLeftDoor) || isOpen(data.frontRightDoor) ||
+          isOpen(data.rearLeftDoor) || isOpen(data.rearRightDoor)) {
+        open.push('door');
+      }
+      if (isOpen(data.tailgate)) {
+        open.push('boot');
+      }
+      if (isOpen(data.hood)) {
+        open.push('hood');
+      }
+      cb(null, {
+        locked: lock === 'LOCKED' ? true : lock === 'UNLOCKED' ? false : null,
+        lockedAt: timeOf(data.centralLock),
+        open: open
+      });
+    });
   }
 
   // The value of one Energy API resource, or null if the car could not supply it.
@@ -393,7 +472,8 @@ module.exports = function createVolvo(deps) {
 
   /**
    * Battery level and charging from the Energy API.
-   * @param {function(Object|null)} cb - cb({battery: number|null, charge: Object|null}), or
+   * @param {function(Object|null)} cb - cb({battery: number|null, range: {value, unit}|null,
+   *   charge: Object|null}), or
    *   cb(null) when the Energy API could not be read
    */
   function getEnergy(cb) {
@@ -412,8 +492,13 @@ module.exports = function createVolvo(deps) {
         cb(null);
         return;
       }
+      var range = Number(energyValue(data.electricRange));
       cb({
         battery: percentOrNull(energyValue(data.batteryChargeLevel)),
+        range: energyValue(data.electricRange) === null || isNaN(range) ? null : {
+          value: Math.round(range),
+          unit: (data.electricRange.unit || 'km').toLowerCase() === 'mi' ? 'mi' : 'km'
+        },
         charge: chargeFrom(data)
       });
     });
@@ -423,11 +508,12 @@ module.exports = function createVolvo(deps) {
    * What the car last reported. Each part needs its own scopes on the Volvo application, so a
    * part that cannot be read is left null rather than failing the whole status.
    * @param {function(string|null, Object=)} cb - cb(errorText) only if nothing could be read,
-   *   else cb(null, {locked: boolean|null, open: string[]|null, battery: number|null,
+   *   else cb(null, {locked: boolean|null, lockedAt: number|null, open: string[]|null,
+   *   battery: number|null, range: {value, unit}|null,
    *   charge: {state: string, minutes: number|null, target: number|null}|null})
    */
   function getStatus(cb) {
-    var status = { locked: null, open: null, battery: null, charge: null };
+    var status = { locked: null, lockedAt: null, open: null, battery: null, range: null, charge: null };
     var pending = 2;
     var errors = [];
     function done(err) {
@@ -440,21 +526,11 @@ module.exports = function createVolvo(deps) {
       }
     }
 
-    api('GET', CONNECTED_VEHICLE, 'doors', function(err, data) {
+    getLock(function(err, lock) {
       if (!err) {
-        var lock = data.centralLock && data.centralLock.value;
-        status.locked = lock === 'LOCKED' ? true : lock === 'UNLOCKED' ? false : null;
-        status.open = [];
-        if (isOpen(data.frontLeftDoor) || isOpen(data.frontRightDoor) ||
-            isOpen(data.rearLeftDoor) || isOpen(data.rearRightDoor)) {
-          status.open.push('door');
-        }
-        if (isOpen(data.tailgate)) {
-          status.open.push('boot');
-        }
-        if (isOpen(data.hood)) {
-          status.open.push('hood');
-        }
+        status.locked = lock.locked;
+        status.lockedAt = lock.lockedAt;
+        status.open = lock.open;
       }
       done(err);
     });
@@ -464,6 +540,7 @@ module.exports = function createVolvo(deps) {
     getEnergy(function(energy) {
       if (energy) {
         status.battery = energy.battery;
+        status.range = energy.range;
         status.charge = energy.charge;
       }
       if (status.battery !== null) {
@@ -503,17 +580,19 @@ module.exports = function createVolvo(deps) {
 
   /**
    * Stop climate if this app believes it is running, otherwise start it.
-   * @param {function(string|null, boolean=)} cb - cb(errorText) or cb(null, isNowOn)
+   * @param {function(string|null, boolean=, boolean=)} cb - cb(errorText), or
+   *   cb(null, isNowOn, unconfirmed): unconfirmed is set when the car did not confirm in time.
+   *   It usually carries the command out all the same, so that counts as done.
    */
   function toggleClimate(cb) {
     var turnOn = !climateIsOn();
     sendCommand(turnOn ? 'climatization-start' : 'climatization-stop', function(err) {
-      if (err) {
+      if (err && !isUncertain(err)) {
         cb(err);
         return;
       }
       save(CLIMATE_KEY, { on: turnOn, startedAt: now() });
-      cb(null, turnOn);
+      cb(null, turnOn, !!err);
     });
   }
 
@@ -522,7 +601,11 @@ module.exports = function createVolvo(deps) {
     describe: describe,
     importSetupCode: importSetupCode,
     getAccessToken: getAccessToken,
+    grantedScopes: grantedScopes,
+    mayUse: mayUse,
+    read: read,
     sendCommand: sendCommand,
+    getLock: getLock,
     getStatus: getStatus,
     getCarLocation: getCarLocation,
     climateIsOn: climateIsOn,
@@ -579,6 +662,11 @@ function watchStatus(status) {
   };
 }
 
+/** Whether a command that failed with this error text may have reached the car anyway. */
+function isUncertain(err) {
+  return UNCERTAIN_ERRORS.indexOf(err) !== -1;
+}
+
 /** Whether an error text from this module means that the user has to sign in again. */
 function isLoginExpired(err) {
   return err === LOGIN_EXPIRED_SIGN_IN || err === LOGIN_EXPIRED_OWN_KEYS;
@@ -586,5 +674,7 @@ function isLoginExpired(err) {
 
 module.exports.watchStatus = watchStatus;
 module.exports.isLoginExpired = isLoginExpired;
+module.exports.isUncertain = isUncertain;
+module.exports.chargeText = chargeText;
 module.exports.base64Encode = base64Encode;
 module.exports.base64Decode = base64Decode;

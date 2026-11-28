@@ -88,9 +88,12 @@ Every action needs a **hold** of about a second, so that a bump cannot unlock yo
 
 | Button | Action |
 | --- | --- |
-| Hold UP | Unlock |
+| Hold UP | Lock or unlock, whichever the car is not |
 | Hold SELECT (middle) | Climate on or off |
-| Hold DOWN | Lock |
+| Hold DOWN | More: Car info, Find car, and whatever else your login may do |
+
+Before UP does anything, PebbleKey asks the car whether it is locked. So with your hands full of
+shopping, one hold of UP locks the car.
 
 If your phone is more than 200 m from the car when you unlock, the watch tells you how far away
 the car is and waits for a second hold of UP. You can change that distance, or switch the check

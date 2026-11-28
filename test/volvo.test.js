@@ -39,6 +39,7 @@ function makeXhr(handler, log) {
     self.setRequestHeader = function(k, v) { req.headers[k] = v; };
     self.send = function(body) {
       req.body = body;
+      req.timeout = self.timeout;
       log.push(req);
       setImmediate(function() {
         var res = handler(req);
@@ -74,7 +75,11 @@ function backend(opts) {
       state.n += 1;
       state.refreshToken = 'rt-' + state.n;
       state.accessToken = 'at-' + state.n;
-      return { status: 200, body: { access_token: state.accessToken, refresh_token: state.refreshToken, expires_in: 300 } };
+      var tokenBody = { access_token: state.accessToken, refresh_token: state.refreshToken, expires_in: 300 };
+      if (opts.scope) {
+        tokenBody.scope = opts.scope;
+      }
+      return { status: 200, body: tokenBody };
     }
     if (opts.rejectFirstCommand && !state.rejected) {
       state.rejected = true;
@@ -270,7 +275,7 @@ test('status: reads lock state, open doors and battery', async function() {
   s.volvo.importSetupCode(setupCode('rt-0'));
   var result = await status(s.volvo);
   assert.strictEqual(result.err, null);
-  assert.deepStrictEqual(result.status, { locked: false, open: ['boot'], battery: 78, charge: null });
+  assert.deepStrictEqual(result.status, { locked: false, lockedAt: null, open: ['boot'], battery: 78, range: null, charge: null });
   var doors = s.log.filter(function(r) { return /\/doors$/.test(r.url); })[0];
   assert.strictEqual(doors.method, 'GET');
   assert.strictEqual(doors.body, null);
@@ -283,7 +288,7 @@ test('status: a part without its scope is left out, all parts failing is an erro
   partial.volvo.importSetupCode(setupCode('rt-0'));
   var result = await status(partial.volvo);
   assert.strictEqual(result.err, null);
-  assert.deepStrictEqual(result.status, { locked: true, open: [], battery: null, charge: null });
+  assert.deepStrictEqual(result.status, { locked: true, lockedAt: null, open: [], battery: null, range: null, charge: null });
 
   var none = setup();
   none.volvo.importSetupCode(setupCode('rt-0'));
@@ -359,7 +364,7 @@ test('status: battery and charging come from the Energy API in one call', async 
   var result = await status(s.volvo);
   assert.strictEqual(result.err, null);
   assert.deepStrictEqual(result.status, {
-    locked: true, open: [], battery: 61, charge: { state: 'CHARGING', minutes: 95, target: 80 }
+    locked: true, lockedAt: null, open: [], battery: 61, range: null, charge: { state: 'CHARGING', minutes: 95, target: 80 }
   });
   var energy = requests(s, '/state')[0];
   assert.strictEqual(energy.url, 'https://api.volvocars.com/energy/v2/vehicles/YV1ABCDEFGH123456/state');
@@ -406,7 +411,7 @@ test('status: falls back to the Connected Vehicle API for the battery level', as
 test('status: a login without the energy scope is asked again only once a day', async function() {
   var s = setup({ status: { fuel: { batteryChargeLevel: { value: 40 } } } });
   s.volvo.importSetupCode(setupCode('rt-0'));
-  assert.deepStrictEqual((await status(s.volvo)).status, { locked: null, open: null, battery: 40, charge: null });
+  assert.deepStrictEqual((await status(s.volvo)).status, { locked: null, lockedAt: null, open: null, battery: 40, range: null, charge: null });
   await status(s.volvo);
   assert.strictEqual(requests(s, '/state').length, 1);
   assert.strictEqual(requests(s, '/fuel').length, 2);
@@ -546,4 +551,64 @@ test('own-keys setup code still refreshes directly with Volvo in a sign-in build
   assert.match(log[0].url, /auth\.volvocars\.com.*\/token$/);
   assert.match(log[0].headers.authorization, /^Basic /);
   assert.match(log[0].body, /^grant_type=refresh_token&refresh_token=rt-0$/);
+});
+
+test('car commands wait longer for an answer than reads do', async function() {
+  var s = setup({ status: { doors: { centralLock: { value: 'LOCKED' } } } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  await send(s.volvo, 'lock');
+  await status(s.volvo);
+  var command = s.log.filter(function(r) { return /commands\/lock$/.test(r.url); })[0];
+  var doors = s.log.filter(function(r) { return /\/doors$/.test(r.url); })[0];
+  assert.ok(command.timeout >= 100000, 'command timeout ' + command.timeout);
+  assert.strictEqual(doors.timeout, 30000);
+});
+
+test('climate: a car that is slow to confirm counts as done, but unconfirmed', async function() {
+  var s = setup({ invokeStatus: 'TIMEOUT' });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  var result = await new Promise(function(resolve) {
+    s.volvo.toggleClimate(function(err, isOn, unconfirmed) {
+      resolve({ err: err, isOn: isOn, unconfirmed: unconfirmed });
+    });
+  });
+  assert.deepStrictEqual(result, { err: null, isOn: true, unconfirmed: true });
+  assert.strictEqual(s.volvo.climateIsOn(), true);
+  // A lock that timed out is reported as an uncertain failure, for the caller to check.
+  var lock = await send(s.volvo, 'lock');
+  assert.strictEqual(lock.err, 'Car did not answer');
+  assert.strictEqual(createVolvo.isUncertain(lock.err), true);
+  assert.strictEqual(createVolvo.isUncertain('Car is asleep'), false);
+});
+
+test('scopes: unknown until a refresh names them, then kept', async function() {
+  var s = setup({ scope: 'openid conve:lock conve:honk_flash' });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  assert.strictEqual(s.volvo.grantedScopes(), null);
+  assert.strictEqual(s.volvo.mayUse('conve:tyre_status'), true);
+  await send(s.volvo, 'lock');
+  assert.deepStrictEqual(s.volvo.grantedScopes(), ['openid', 'conve:lock', 'conve:honk_flash']);
+  assert.strictEqual(s.volvo.mayUse('conve:honk_flash'), true);
+  assert.strictEqual(s.volvo.mayUse('conve:tyre_status'), false);
+});
+
+test('lock state comes with the time the car reported it', async function() {
+  var s = setup({ status: { doors: {
+    centralLock: { value: 'UNLOCKED', timestamp: '2026-11-28T10:00:00.000Z' },
+    tailgate: { value: 'OPEN' }
+  } } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  var lock = await new Promise(function(resolve) {
+    s.volvo.getLock(function(err, l) { resolve(err || l); });
+  });
+  assert.deepStrictEqual(lock, { locked: false, lockedAt: Date.parse('2026-11-28T10:00:00.000Z'), open: ['boot'] });
+});
+
+test('status: the range comes from the Energy API', async function() {
+  var s = setup({ status: { state: {
+    batteryChargeLevel: { status: 'OK', value: 70 },
+    electricRange: { status: 'OK', value: 251.4, unit: 'km' }
+  } } });
+  s.volvo.importSetupCode(setupCode('rt-0'));
+  assert.deepStrictEqual((await status(s.volvo)).status.range, { value: 251, unit: 'km' });
 });
