@@ -1,9 +1,9 @@
 PebbleKey for Volvo puts your car key on your wrist.
 
 Hold a button on your Pebble:
-- UP: unlock
+- UP: lock or unlock. PebbleKey asks the car first and does the opposite, so one hold locks it when your hands are full
 - SELECT (middle): start or stop the climate, to pre-heat or cool the cabin
-- DOWN: lock
+- DOWN: more, such as car info (battery, range, windows, tyres, odometer), find car, and flash lights
 
 The screen shows whether the car is locked, its battery level, and whether a door, the boot or the hood is open. While the car charges, it also shows the charge target and the time left.
 

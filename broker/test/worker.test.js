@@ -246,12 +246,12 @@ function postRefresh(broker, body, env = ENV) {
 
 test('/refresh adds the client secret and returns the new tokens with the API key', async () => {
   const volvo = fakeVolvo({
-    token: () => reply(200, { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 300, id_token: 'x' })
+    token: () => reply(200, { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 300, id_token: 'x', scope: 'openid conve:lock' })
   });
   const response = await postRefresh(createBroker(volvo), 'refresh_token=' + encodeURIComponent('old+token/='));
   assert.strictEqual(response.status, 200);
   assert.deepStrictEqual(await response.json(),
-    { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 300, api_key: 'api-key-1' });
+    { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 300, scope: 'openid conve:lock', api_key: 'api-key-1' });
   assert.strictEqual(volvo.calls[0].headers.authorization, BASIC);
   assert.strictEqual(volvo.calls[0].form.get('grant_type'), 'refresh_token');
   assert.strictEqual(volvo.calls[0].form.get('refresh_token'), 'old+token/=');

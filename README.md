@@ -54,9 +54,20 @@ compares the two.
 
 | Button | Action |
 | --- | --- |
-| Hold UP | Unlock (asks for a second hold if the phone is not near the car) |
+| Hold UP | Lock or unlock: PebbleKey asks the car first and does the opposite. Unlocking asks for a second hold if the phone is not near the car |
 | Hold SELECT (middle) | Climate on, or off if PebbleKey turned it on |
-| Hold DOWN | Lock |
+| Hold DOWN | More: a menu with Car info, Find car, Flash lights and Honk & flash |
+
+The UP icon shows what a hold will do: a shut padlock locks, an open one unlocks. With your hands
+full, one hold of UP locks the car.
+
+The DOWN menu lists only what your Volvo login may do. **Car info** gathers what the car reports:
+lock state and what is open, battery and range, charging, open windows, tyre warnings, the
+odometer and how far away the car is. **Find car** gives the distance and direction from your
+phone. Some of these need [extra scopes](#1-create-a-volvo-api-application).
+
+Right after a lock or unlock, Volvo still reports the car's old state for a while. PebbleKey keeps
+showing the new state until the car has reported it, and checks back a few times.
 
 The icons on the right sit next to the buttons they belong to. The rest of the screen shows
 what the car last reported:
@@ -164,7 +175,9 @@ The Pebble phone app will ask you to allow PebbleKey:
 | `conve:lock_status`, `conve:doors_status` | Lock state and open doors on the watch |
 | `conve:fuel_status`, `conve:battery_charge_level` | Battery level on the watch |
 | `energy:state:read` | Charging and time left on the watch |
-| `location:read` | Distance check before unlocking |
+| `location:read` | Distance check before unlocking; Find car |
+| `conve:honk_flash` | Flash lights, Honk & flash (DOWN menu) |
+| `conve:windows_status`, `conve:tyre_status`, `conve:odometer_status` | Windows, tyres and odometer in Car info |
 
 Only lock and unlock are required. Anything you leave out is simply missing in the app.
 
@@ -249,6 +262,8 @@ first command.
 | This build has no sign-in | The setup code came from a sign-in service this build does not use |
 | Not allowed (scopes?) | The Volvo application lacks the scope for this action |
 | Car is asleep / Car is offline | The car did not take the command; try again shortly |
+| Climate on, car slow to confirm | Volvo stopped waiting for the car's answer. The car nearly always starts climate anyway |
+| Car did not answer | Volvo stopped waiting for the car, and the car's state did not show that the lock or unlock went through |
 | A door is open | The car refused to lock |
 | Car is 2.3 km away | Distance check: hold UP again to unlock anyway |
 | No car location / No phone location | Distance check could not run; hold UP again to unlock anyway |
@@ -282,7 +297,9 @@ cd broker && npx wrangler deploy
    the redirect URI is your service's address followed by `/callback`, and you also tick
    `conve:vehicle_relation` (used to list the user's cars). Tick every scope in the table; if
    one is missing, Volvo rejects every sign-in until you list your scopes in `VOLVO_SCOPES`
-   (see [broker/wrangler.toml](broker/wrangler.toml)).
+   (see [broker/wrangler.toml](broker/wrangler.toml)). The DOWN menu's extra scopes
+   (`conve:honk_flash` and the rest of the last two table rows) are not requested by default:
+   tick them and add them to `VOLVO_SCOPES` to offer them.
 3. Give the service its three keys. Each command asks you to paste one value.
 
 ```bash

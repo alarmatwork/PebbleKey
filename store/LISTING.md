@@ -18,7 +18,7 @@ does not appear in search, and you can switch it to Listed later.
 
 | Field | Value |
 | --- | --- |
-| File | `dist/PebbleKey.pbw` (version 1.1.0) |
+| File | `dist/PebbleKey.pbw` (version 1.2.0) |
 | App name | PebbleKey for Volvo |
 | Category | Remotes |
 | Description | the text in [description.txt](description.txt) |
@@ -49,6 +49,13 @@ The five screens, in the order to upload them: `1_locked`, `2_unlocked`, `3_clim
 `4_far_away`, `5_charging`.
 
 ## Release notes
+
+**1.2.0**
+
+> UP now locks or unlocks: PebbleKey asks the car and does the opposite. DOWN opens a menu with
+> car info, find car, and flashing the lights.
+> Climate no longer reports a failure when the car is only slow to confirm.
+> After locking, the watch no longer briefly goes back to the old lock state.
 
 **1.1.0**
 

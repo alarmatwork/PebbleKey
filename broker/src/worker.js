@@ -21,7 +21,9 @@ const TOKEN_URL = 'https://auth.volvocars.com/realms/volvocars/protocol/openid-c
 const VEHICLES_URL = 'https://api.volvocars.com/connected-vehicle/v2/vehicles';
 
 // Every scope here must be ticked on the Volvo application, or Volvo rejects the sign-in.
-// Override with the VOLVO_SCOPES variable if your application has fewer.
+// Override with the VOLVO_SCOPES variable if your application has fewer, or more: the watch's
+// DOWN menu can also use conve:honk_flash, conve:windows_status, conve:tyre_status and
+// conve:odometer_status.
 const DEFAULT_SCOPES = [
   'openid',
   'conve:vehicle_relation',
@@ -387,6 +389,8 @@ async function refresh(request, env, fetcher) {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_in: tokens.expires_in,
+      // What the login may do, so the watch offers only what will work.
+      scope: tokens.scope,
       // Sent every time, so replacing the key here reaches every phone on its next refresh.
       api_key: env.VOLVO_API_KEY
     });

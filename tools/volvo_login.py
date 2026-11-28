@@ -43,6 +43,10 @@ SCOPES = {
     "conve:battery_charge_level": "battery level on the watch",
     "energy:state:read": "charging and time left on the watch",
     "location:read": "distance check before unlocking",
+    "conve:honk_flash": "flash lights and honk from the DOWN menu",
+    "conve:windows_status": "open windows in Car info",
+    "conve:tyre_status": "tyre warnings in Car info",
+    "conve:odometer_status": "odometer in Car info",
 }
 REQUIRED_SCOPES = ("openid", "conve:lock", "conve:unlock")
 SETUP_PREFIX = "EX30K1."
